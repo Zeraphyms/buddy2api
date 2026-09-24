@@ -7,6 +7,7 @@ const labels = {
   accounts: ["账号池", "ACCOUNT POOL", "集中管理登录凭据、积分与可用状态，让请求自动分配到可用账号。"],
   keys: ["API 密钥", "CLIENT ACCESS", "为每个客户端分配独立密钥，让连接清晰可控。"],
   models: ["模型与倍率", "MODEL RATES", "查看每个模型的官方倍率、限时免费促销与本机实测扣费。"],
+  taskcenter: ["任务中心", "TASK CENTER", "扫描全部账号的待办任务，并按队列执行。"],
   usage: ["用量", "USAGE", "按账号、模型与域查看 token 消耗与请求表现。"],
   test: ["连接测试", "CONNECTION LAB", "从当前账号发起请求，确认模型能否正常响应。"],
   guide: ["接入指南", "GET CONNECTED", "从导入凭据到客户端接入，只需几步。"]
@@ -41,6 +42,7 @@ function goPage(next) {
   history.replaceState(null, "", "#" + next);
   if (next === "models") loadModels().catch(e => toast(e.message));
   if (next === "usage") loadUsage().catch(e => toast(e.message));
+  if (next === "taskcenter") loadTaskCenter().catch(e => toast(e.message));
 }
 const fmtRate = v => v === null || v === undefined ? "—" : "x" + Number(v).toFixed(2);
 const fmtNum = v => v === null || v === undefined || v === "" ? "—" : Number(v).toLocaleString("zh-CN");
@@ -244,7 +246,7 @@ function renderAccounts() {
   $("accounts-body").innerHTML = rows.map(a => {
     const status = labels[a.pool_state] || ["待查询", ""];
     const credits = a.remaining === null || a.remaining === undefined ? "—" : Number(a.remaining).toLocaleString("zh-CN",{maximumFractionDigits:2});
-    return `<tr><td><div class="account-cell"><span class="account-icon">${esc(a.name.slice(0,1))}</span><div><strong>${esc(a.name)}${a.active ? '<span class="mini-active">手动 / 测试账号</span>' : ""}</strong><small>${esc(a.uid || a.nickname)}</small></div></div></td><td><span class="pill ${status[1]}">${status[0]}</span><small class="cell-note">${a.today_checked_in ? "今日已签到" : "今日未确认签到"}</small>${a.cooldown_until > Date.now()/1000 ? `<small class="cell-note">至 ${esc(stamp(a.cooldown_until*1000))}</small>` : ""}</td><td><strong class="credit-number">${credits}</strong><small class="cell-note">${a.credits_updated ? esc(stamp(a.credits_updated*1000)) : "点击查询积分"}${a.credits_stale && a.credits_updated ? " · 待刷新" : ""}</small>${a.last_error ? `<small class="cell-note field-error">${esc(a.last_error)}</small>` : ""}</td><td class="mono">${esc(stamp(a.expires_at))}<small class="cell-note">${a.expired ? "已到期 · 调用时尝试刷新" : "支持自动刷新"}</small></td><td><div class="actions pool-actions">${a.enabled ? `<button data-action="status" data-id="${a.id}" title="查询积分与签到状态">查询积分</button><button data-action="checkin" data-id="${a.id}">签到</button><button data-action="refresh" data-id="${a.id}">刷新凭据</button>` : ""}${a.enabled && !a.active ? `<button class="switch" data-action="activate" data-id="${a.id}">设为手动 / 测试</button>` : ""}<button data-action="rename" data-id="${a.id}">备注</button><button data-action="toggle" data-id="${a.id}">${a.enabled ? "暂停" : "恢复"}</button><button class="danger" data-action="delete" data-id="${a.id}">删除</button></div></td></tr>`;
+    return `<tr><td><div class="account-cell"><span class="account-icon">${esc(a.name.slice(0,1))}</span><div><strong>${esc(a.name)}${a.active ? '<span class="mini-active">手动 / 测试账号</span>' : ""}</strong><small>${esc(a.uid || a.nickname)}</small></div></div></td><td><span class="pill ${status[1]}">${status[0]}</span><small class="cell-note">${a.today_checked_in ? "今日已签到" : "今日未确认签到"}</small>${a.cooldown_until > Date.now()/1000 ? `<small class="cell-note">至 ${esc(stamp(a.cooldown_until*1000))}</small>` : ""}</td><td><strong class="credit-number">${credits}</strong><small class="cell-note">${a.credits_updated ? esc(stamp(a.credits_updated*1000)) : "点击查询积分"}${a.credits_stale && a.credits_updated ? " · 待刷新" : ""}</small>${a.last_error ? `<small class="cell-note field-error">${esc(a.last_error)}</small>` : ""}</td><td class="mono">${esc(stamp(a.expires_at))}<small class="cell-note">${a.expired ? "已到期 · 调用时尝试刷新" : "支持自动刷新"}</small></td><td><div class="actions pool-actions">${a.enabled ? `<button data-action="status" data-id="${a.id}" title="查询积分与签到状态">查询积分</button><button data-action="checkin" data-id="${a.id}">签到</button><button data-action="refresh" data-id="${a.id}">刷新凭据</button>` : ""}${a.enabled && !a.active ? `<button class="switch" data-action="activate" data-id="${a.id}">设为手动 / 测试</button>` : ""}<button data-action="tasks" data-id="${a.id}">任务</button><button data-action="rename" data-id="${a.id}">备注</button><button data-action="toggle" data-id="${a.id}">${a.enabled ? "暂停" : "恢复"}</button><button class="danger" data-action="delete" data-id="${a.id}">删除</button></div></td></tr>`;
   }).join("") || (overview.accounts.length ? '<tr><td colspan="5" class="muted">没有符合筛选条件的账号。</td></tr>' : "");
 }
 $("account-search").addEventListener("input", () => { if(overview) renderAccounts(); });
@@ -367,6 +369,12 @@ $("confirm-form").addEventListener("submit", async e => { e.preventDefault(); e.
 $("accounts-body").addEventListener("click", async e => {
   const b = e.target.closest("[data-action]"); if (!b) return;
   const a = overview.accounts.find(x => x.id === b.dataset.id); if (!a) return;
+  if (b.dataset.action === "tasks") {
+    $("task-dialog").showModal();
+    $("task-title").textContent = "积分任务";
+    loadTasks(a.id);
+    return;
+  }
   if (["status","checkin","refresh"].includes(b.dataset.action)) {
     b.disabled = true;
     try { const result=await api(`accounts/${a.id}/actions/${b.dataset.action}`,{method:"POST"});toast(result.message);await refresh(); }
@@ -400,6 +408,213 @@ $("copy-guide-key").addEventListener("click", () => {
 
 $("usage-refresh").addEventListener("click", () => loadUsage().then(() => toast("\u7528\u91cf\u5df2\u5237\u65b0")).catch(e => toast(e.message)));
 $("usage-reset").addEventListener("click", () => confirmAction("\u6e05\u96f6\u7528\u91cf\u7edf\u8ba1\uff1f", "\u5c06\u6e05\u7a7a\u6309\u8d26\u53f7\u3001\u6a21\u578b\u3001\u57df\u7684\u7d2f\u8ba1\u8ba1\u6570\u4e0e\u65f6\u5e8f\u6570\u636e\uff0c\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002", async () => { await api("usage/reset", {method:"POST"}); await loadUsage(); }));
+
+// ---------------- 积分任务 ----------------
+let taskAccount = null;
+// 支持一键完成的任务（与后端 autotask.ACTIONS 对应）
+const AUTO_TASKS = new Set([
+  "chat_5", "first_buddy", "Model_chat_GLM5.2", "RichMeow_Chat",
+  "Buddy_App", "Buddy_App_QQ", "automation_1", "Library_read",
+  "template_5", "playbook_prompt", "create_canvas", "Hp_Appearance", "black_cat",
+]);
+
+function renderTasks(data) {
+  const rows = (data && data.tasks) || [];
+  if (!data || !data.ok) {
+    $("task-body").innerHTML = `<p class="history-empty">${esc((data && data.message) || "查询失败")}</p>`;
+    return;
+  }
+  if (!rows.length) {
+    $("task-body").innerHTML = '<p class="history-empty">该账号没有可用的任务</p>';
+    return;
+  }
+  const claimable = rows.filter(t => t.claimable).length;
+  const claimed = rows.filter(t => t.claimed).length;
+  $("task-title").textContent = `积分任务 · ${claimable ? claimable + " 项可领取" : "共 " + rows.length + " 项"}`;
+  $("task-body").innerHTML = rows.map(t => {
+    const prog = t.target ? `${t.current} / ${t.target}` : "—";
+    const reward = [
+      t.credit ? `+${t.credit} 分` : "",
+      t.energy ? `+${t.energy} 能` : "",
+      t.reward_buddy ? "Buddy" : "",
+    ].filter(Boolean).join(" ") || "—";
+    let status, cls;
+    if (t.claimed) { status = "已领取"; cls = "pill"; }
+    else if (t.claimable) { status = "可领取"; cls = "pill green"; }
+    else if (t.accept_status === "accepted") { status = "进行中"; cls = "pill amber"; }
+    else { status = "未接受"; cls = "pill"; }
+    const auto = AUTO_TASKS.has(t.task_code);
+    const buttons = [];
+    if (auto && !t.claimed) {
+      buttons.push(`<button class="secondary" data-task-auto="${esc(t.task_code)}">一键完成</button>`);
+    }
+    if (t.claimable) {
+      buttons.push(`<button class="primary" data-task-claim="${esc(t.task_code)}">领取</button>`);
+    }
+    const action = buttons.join("");
+    return `<div class="task-row">
+      <div class="task-main">
+        <strong>${esc(t.title || t.task_code)}</strong>
+        <small class="cell-note mono">${esc(t.task_code)}${t.tag ? " · " + esc(t.tag) : ""}${t.level_name ? " · " + esc(t.level_name) : ""}</small>
+        ${t.task_desc ? `<small class="cell-note">${esc(t.task_desc)}</small>` : ""}
+      </div>
+      <div class="task-progress mono">${prog}</div>
+      <div class="task-reward mono">${reward}</div>
+      <div class="task-status"><span class="${cls}">${status}</span></div>
+      <div class="task-action">${action}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadTasks(aid) {
+  taskAccount = aid;
+  $("task-body").innerHTML = "正在加载任务列表…";
+  try {
+    renderTasks(await api(`accounts/${aid}/tasks`));
+  } catch (e) {
+    $("task-body").innerHTML = `<p class="history-empty">${esc(e.message)}</p>`;
+  }
+}
+
+$("task-refresh").addEventListener("click", () => taskAccount && loadTasks(taskAccount));
+$("task-accept-all").addEventListener("click", async () => {
+  if (!taskAccount) return;
+  $("task-accept-all").disabled = true;
+  try {
+    const r = await api(`accounts/${taskAccount}/tasks/accept`, {method:"POST", body:{}});
+    toast(r.message || "已接受任务");
+    await loadTasks(taskAccount);
+  } catch (e) { toast(e.message); }
+  finally { $("task-accept-all").disabled = false; }
+});
+$("task-auto-all").addEventListener("click", async () => {
+  if (!taskAccount) return;
+  const btn = $("task-auto-all");
+  btn.disabled = true;
+  btn.textContent = "执行中，请稍候…";
+  try {
+    const r = await api(`accounts/${taskAccount}/tasks/auto_all`, {method:"POST", body:{}});
+    toast(r.message || "执行完成");
+    await loadTasks(taskAccount);
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = "一键完成可自动任务"; }
+});
+$("task-claim-all").addEventListener("click", async () => {
+  if (!taskAccount) return;
+  $("task-claim-all").disabled = true;
+  $("task-claim-all").textContent = "领取中…";
+  try {
+    const r = await api(`accounts/${taskAccount}/tasks/claim_all`, {method:"POST", body:{}});
+    toast(r.message || "领取完成");
+    await loadTasks(taskAccount);
+  } catch (e) { toast(e.message); }
+  finally { $("task-claim-all").disabled = false; $("task-claim-all").textContent = "领取可领奖励"; }
+});
+$("task-body").addEventListener("click", async e => {
+  const autoBtn = e.target.closest("[data-task-auto]");
+  if (autoBtn && taskAccount) {
+    autoBtn.disabled = true;
+    autoBtn.textContent = "执行中…";
+    try {
+      const r = await api(`accounts/${taskAccount}/tasks/auto`, {method:"POST", body:{code:autoBtn.dataset.taskAuto}});
+      toast(r.message || "已执行");
+      await loadTasks(taskAccount);
+    } catch (err) { toast(err.message); autoBtn.disabled = false; autoBtn.textContent = "一键完成"; }
+    return;
+  }
+  const b = e.target.closest("[data-task-claim]");
+  if (!b || !taskAccount) return;
+  b.disabled = true;
+  try {
+    const r = await api(`accounts/${taskAccount}/tasks/claim`, {method:"POST", body:{code:b.dataset.taskClaim}});
+    toast(r.message || "已领取");
+    await loadTasks(taskAccount);
+  } catch (err) { toast(err.message); b.disabled = false; }
+});
+
+// ---------------- 任务中心 ----------------
+let tcTimer = null;
+
+async function loadTaskCenter() {
+  try { renderTaskQueue(await api("tasks/queue")); } catch (e) { /* 未启动 */ }
+}
+
+async function scanTasks() {
+  const btn = $("tc-scan");
+  btn.disabled = true;
+  btn.textContent = "扫描中…";
+  $("tc-accounts").innerHTML = "正在并发扫描各账号，请稍候…";
+  try {
+    const d = await api("tasks/scan");
+    renderTaskScan(d);
+  } catch (e) { toast(e.message); $("tc-accounts").textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = "扫描待办"; }
+}
+
+function renderTaskScan(d) {
+  const accounts = d.accounts || [];
+  $("tc-summary").innerHTML = [
+    ["账号", accounts.length],
+    ["待办项", d.pending_count || 0],
+    ["可领奖", accounts.reduce((s, a) => s + (a.claimable || 0), 0)],
+  ].map(([k, v]) => `<div class="tc-card"><strong>${esc(v)}</strong><span>${esc(k)}</span></div>`).join("");
+  if (!accounts.length) { $("tc-accounts").innerHTML = '<p class="history-empty">没有启用中的账号</p>'; return; }
+  $("tc-accounts").innerHTML = accounts.map(a => {
+    const pending = (a.pending || []).map(p => {
+      const prog = p.target ? `${p.current}/${p.target}` : "—";
+      return `<span class="model-chip" title="${esc(p.title)}">${esc(p.code)} ${esc(prog)}${p.credit ? " +" + p.credit : ""}</span>`;
+    }).join("") || '<span class="muted">无待办</span>';
+    const err = a.error ? `<small class="cell-note field-error">${esc(a.error)}</small>` : "";
+    return `<div class="tc-row">
+      <div class="tc-row-head"><strong>${esc(a.name)}</strong>
+        <small class="cell-note">已领 ${a.claimed}/${a.total}${a.claimable ? " · 可领 " + a.claimable : ""}</small></div>
+      <div class="tc-chips">${pending}</div>${err}</div>`;
+  }).join("");
+}
+
+async function runTaskQueue() {
+  const btn = $("tc-run");
+  const conc = parseInt($("tc-concurrency").value, 10) || 1;
+  btn.disabled = true;
+  btn.textContent = "启动中…";
+  try {
+    const r = await api("tasks/queue", {method:"POST", body:{concurrency:conc}});
+    toast(r.message || "队列已启动");
+    if (r.total) startQueuePolling();
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = "执行队列"; }
+}
+
+function renderTaskQueue(q) {
+  if (!q || !q.total) {
+    $("tc-queue").innerHTML = '<p class="history-empty">尚未启动队列。</p>';
+    $("tc-progress").textContent = "";
+    return;
+  }
+  $("tc-progress").textContent = `${q.done + q.failed} / ${q.total}${q.running ? " · 执行中" : " · 已结束"}`;
+  const label = {pending:"等待", running:"执行中", done:"完成", error:"失败", skipped:"跳过"};
+  const cls = {pending:"", running:"amber", done:"green", error:"red", skipped:""};
+  $("tc-queue").innerHTML = (q.items || []).map(it => `<div class="tc-item">
+    <div class="tc-item-main"><strong>${esc(it.code)}</strong>
+      <small class="cell-note">${esc(it.nickname)}</small></div>
+    <span class="pill ${cls[it.status] || ""}">${label[it.status] || it.status}</span>
+    <small class="tc-item-msg">${esc(it.message || "")}</small>
+  </div>`).join("");
+}
+
+function startQueuePolling() {
+  clearInterval(tcTimer);
+  tcTimer = setInterval(async () => {
+    try {
+      const q = await api("tasks/queue");
+      renderTaskQueue(q);
+      if (!q.running) { clearInterval(tcTimer); tcTimer = null; await scanTasks(); }
+    } catch (e) { clearInterval(tcTimer); tcTimer = null; }
+  }, 2000);
+}
+
+$("tc-scan").addEventListener("click", () => scanTasks());
+$("tc-run").addEventListener("click", () => runTaskQueue());
 $("host-label").textContent = location.host;
 $("test-form").addEventListener("submit", async e => {
   e.preventDefault(); busy = true; $("test-submit").disabled = true; $("test-submit").textContent = "正在调用…"; $("test-status").className = "pill amber"; $("test-status").textContent = "请求中"; $("test-output").textContent = "正在等待上游响应，最长约 90 秒…"; $("test-meta").textContent = "";

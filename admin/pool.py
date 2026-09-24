@@ -16,6 +16,10 @@ from fastapi.responses import JSONResponse
 
 from core import converter
 
+from . import autotask, events
+from . import tasks
+from .taskcenter import TaskCenter
+
 REQUEST_CREDENTIAL = ContextVar("pool_credential", default=None)
 # 当前请求实际使用的账号区域（cn / intl），供倍率统计归属
 REQUEST_REGION = ContextVar("pool_region", default=None)
@@ -85,8 +89,14 @@ class AccountPool:
             store.save()
 
     def operation_lock(self, aid):
+        """账号操作锁。
+
+        用可重入锁：队列执行时已持有该账号的锁，内部的动作（auto_task /
+        accept_tasks）还会再取一次；若是普通 Lock，同线程重入会死锁。
+        RLock 保证账号间互斥语义不变，又允许同线程嵌套获取。
+        """
         with self.store.lock:
-            return self.locks.setdefault(aid, threading.Lock())
+            return self.locks.setdefault(aid, threading.RLock())
 
     def snapshot(self, aid):
         with self.store.lock:
@@ -212,6 +222,180 @@ class AccountPool:
                 raise BillingError("签到状态缺少必要字段")
             return v in (True, 1, "true", "1")
         return {"active": flag("active", "active"), "checked": flag("today_checked_in", "todayCheckedIn")}
+
+    # ---------------- 积分任务 ----------------
+
+    def _task_client(self, aid, item):
+        """构造带该账号凭据的任务客户端。"""
+        manager = self.store.manager_for(aid, item)
+        return tasks.TaskClient(manager.get_headers())
+
+    def list_tasks(self, aid):
+        """查询账号的全量任务（进度 / 奖励 / 状态）。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            try:
+                rows = self._task_client(aid, item).list_tasks()
+            except tasks.TaskError as exc:
+                return {"id": aid, "ok": False, "message": exc.message, "tasks": []}
+            return {"id": aid, "ok": True, "tasks": rows}
+
+    def accept_tasks(self, aid, codes=None):
+        """接受任务（报名）。codes 为空时接受全部未接受的任务。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            try:
+                client = self._task_client(aid, item)
+                if not codes:
+                    rows = client.list_tasks()
+                    codes = [t["task_code"] for t in rows
+                             if t.get("accept_status") not in ("accepted", "claimed")
+                             and not t.get("locked")]
+                if not codes:
+                    return {"id": aid, "ok": True, "message": "没有需要接受的任务", "accepted": []}
+                client.accept(codes)
+            except tasks.TaskError as exc:
+                return {"id": aid, "ok": False, "message": exc.message, "accepted": []}
+            return {"id": aid, "ok": True, "message": "已接受 %d 个任务" % len(codes), "accepted": list(codes)}
+
+    def claim_task(self, aid, code):
+        """领取单个任务奖励。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            try:
+                credit, energy = self._task_client(aid, item).claim(code)
+            except tasks.TaskError as exc:
+                return {"id": aid, "ok": False, "message": exc.message}
+            if not credit and not energy:
+                return {"id": aid, "ok": True, "message": "该任务已领取过", "credit": 0, "energy": 0}
+            # 有新增积分则刷新余额展示
+            if credit:
+                self.update(aid, last_error=None)
+            return {"id": aid, "ok": True,
+                    "message": "已领取 +%d 积分 +%d 能量" % (credit, energy),
+                    "credit": credit, "energy": energy}
+
+    def _auto_runner(self, aid, item):
+        """构造「一键完成」执行器。"""
+        manager = self.store.manager_for(aid, item)
+        headers = manager.get_headers()
+        summary = {}
+        try:
+            summary = manager.summary() or {}
+        except Exception:
+            summary = {}
+        uid = summary.get("uid") or headers.get("X-User-Id", "")
+        nickname = summary.get("nickname") or ""
+        client = tasks.TaskClient(headers)
+        reporter = events.EventReporter(headers, uid=uid, nickname=nickname)
+        return autotask.AutoTaskRunner(client, reporter, client.list_tasks)
+
+    def auto_task(self, aid, code):
+        """对一个任务执行「一键完成」。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            if not item.get("enabled"):
+                return {"id": aid, "ok": False, "message": "账号已暂停"}
+            entry = autotask.ACTION_INDEX.get(code)
+            if entry is None:
+                return {"id": aid, "ok": False, "message": "该任务暂不支持一键完成"}
+            desc, method = entry
+            runner = self._auto_runner(aid, item)
+            try:
+                ok, message = getattr(runner, method)()
+            except (tasks.TaskError, events.EventError) as exc:
+                return {"id": aid, "ok": False, "message": exc.message, "code": code}
+            except Exception as exc:
+                return {"id": aid, "ok": False, "message": "执行失败：%s" % str(exc)[:100], "code": code}
+            return {"id": aid, "ok": ok, "message": message, "code": code}
+
+    def auto_tasks_all(self, aid):
+        """对一个账号执行全部「一键完成」动作，然后领取可领奖励。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            if not item.get("enabled"):
+                return {"id": aid, "ok": False, "message": "账号已暂停", "results": []}
+            runner = self._auto_runner(aid, item)
+            results = []
+            for code, desc, method in autotask.ACTIONS:
+                try:
+                    ok, message = getattr(runner, method)()
+                except (tasks.TaskError, events.EventError) as exc:
+                    ok, message = False, exc.message
+                except Exception as exc:
+                    ok, message = False, "执行失败：%s" % str(exc)[:100]
+                results.append({"code": code, "ok": ok, "message": message})
+            # 动作跑完再统一领奖（进度可能刚被点亮）
+            claimed, credit = [], 0
+            try:
+                client = tasks.TaskClient(item and self.store.manager_for(aid, item).get_headers())
+                for row in client.list_tasks():
+                    if not row.get("claimable"):
+                        continue
+                    try:
+                        c, _ = client.claim(row["task_code"])
+                    except tasks.TaskError:
+                        continue
+                    if c:
+                        claimed.append(row["task_code"])
+                        credit += c
+            except Exception:
+                pass
+            done = sum(1 for r in results if r["ok"])
+            return {"id": aid, "ok": True,
+                    "message": "已执行 %d/%d 个动作，领取 %d 个奖励（+%d 积分）" % (
+                        done, len(results), len(claimed), credit),
+                    "results": results, "claimed": claimed, "credit": credit}
+
+    def claim_all_tasks(self, aid):
+        """领取该账号所有可领取的任务。"""
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            try:
+                client = self._task_client(aid, item)
+                rows = client.list_tasks()
+            except tasks.TaskError as exc:
+                return {"id": aid, "ok": False, "message": exc.message, "claimed": []}
+            done, total_credit, total_energy = [], 0, 0
+            for row in rows:
+                if not row.get("claimable"):
+                    continue
+                try:
+                    credit, energy = client.claim(row["task_code"])
+                except tasks.TaskError:
+                    continue
+                if credit or energy:
+                    done.append(row["task_code"])
+                    total_credit += credit
+                    total_energy += energy
+            if not done:
+                return {"id": aid, "ok": True, "message": "没有可领取的任务", "claimed": []}
+            return {"id": aid, "ok": True,
+                    "message": "已领取 %d 个任务：+%d 积分 +%d 能量" % (len(done), total_credit, total_energy),
+                    "claimed": done, "credit": total_credit, "energy": total_energy}
+
+    # ---------------- 任务中心 ----------------
+
+    def task_center(self):
+        """惰性构造任务中心（依赖 pool 自身）。"""
+        center = getattr(self, "_task_center", None)
+        if center is None:
+            center = TaskCenter(self)
+            self._task_center = center
+        return center
+
+    def scan_tasks(self):
+        """扫描全部账号的待办任务（只读）。"""
+        return self.task_center().scan()
+
+    def queue_tasks(self, concurrency=1):
+        """启动执行队列。"""
+        ok, message, total = self.task_center().start(concurrency)
+        return {"ok": ok, "message": message, "total": total}
+
+    def queue_status(self):
+        """队列实时状态。"""
+        return self.task_center().state.snapshot()
 
     def operate(self, aid, action):
         with self.operation_lock(aid):

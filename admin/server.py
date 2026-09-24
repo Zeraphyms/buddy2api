@@ -708,6 +708,73 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
             keys = store.key_rows()
             return {"accounts": pool.rows(store.account_rows()), "pool": dict(store.data["pool"]), "metrics": metrics.snapshot(), "keys": keys, "models": converter.get_available_models(), "uptime": int(time.time() - store.started), "events": list(store.events)}
 
+    @app.get("/admin/api/accounts/{aid}/tasks")
+    async def account_tasks(aid: str, req: Request):
+        """查询账号的积分任务（进度 / 奖励 / 状态）。"""
+        store.require_admin(req)
+        return await asyncio.to_thread(pool.list_tasks, aid)
+
+    @app.post("/admin/api/accounts/{aid}/tasks/accept")
+    async def account_tasks_accept(aid: str, req: Request):
+        """接受任务（报名）。body.codes 为空则接受全部未接受项。"""
+        store.require_admin(req)
+        body = await payload(req)
+        codes = body.get("codes")
+        if codes is not None and not isinstance(codes, list):
+            raise HTTPException(400, "codes 需为数组")
+        return await asyncio.to_thread(pool.accept_tasks, aid, codes)
+
+    @app.post("/admin/api/accounts/{aid}/tasks/claim")
+    async def account_task_claim(aid: str, req: Request):
+        """领取单个任务奖励。"""
+        store.require_admin(req)
+        body = await payload(req)
+        code = body.get("code")
+        if not isinstance(code, str) or not code:
+            raise HTTPException(400, "缺少任务 code")
+        return await asyncio.to_thread(pool.claim_task, aid, code)
+
+    @app.post("/admin/api/accounts/{aid}/tasks/claim_all")
+    async def account_tasks_claim_all(aid: str, req: Request):
+        """领取该账号所有可领取的任务。"""
+        store.require_admin(req)
+        return await asyncio.to_thread(pool.claim_all_tasks, aid)
+
+    @app.post("/admin/api/accounts/{aid}/tasks/auto")
+    async def account_task_auto(aid: str, req: Request):
+        """对单个任务执行「一键完成」。body.code 为目标任务。"""
+        store.require_admin(req)
+        body = await payload(req)
+        code = body.get("code")
+        if not isinstance(code, str) or not code:
+            raise HTTPException(400, "缺少任务 code")
+        return await asyncio.to_thread(pool.auto_task, aid, code)
+
+    @app.post("/admin/api/accounts/{aid}/tasks/auto_all")
+    async def account_tasks_auto_all(aid: str, req: Request):
+        """执行全部「一键完成」动作，并领取可领奖励。"""
+        store.require_admin(req)
+        return await asyncio.to_thread(pool.auto_tasks_all, aid)
+
+    @app.get("/admin/api/tasks/scan")
+    async def tasks_scan(req: Request):
+        """扫描全部账号的待办任务（只读）。"""
+        store.require_admin(req)
+        return await asyncio.to_thread(pool.scan_tasks)
+
+    @app.post("/admin/api/tasks/queue")
+    async def tasks_queue(req: Request):
+        """启动任务执行队列。body.concurrency 为账号间并发（1-4）。"""
+        store.require_admin(req)
+        body = await payload(req)
+        return await asyncio.to_thread(pool.queue_tasks, body.get("concurrency", 1))
+
+    @app.get("/admin/api/tasks/queue")
+    async def tasks_queue_status(req: Request):
+        """队列实时状态。"""
+        store.require_admin(req)
+        return pool.queue_status()
+
     @app.post("/admin/api/accounts/{aid}/actions/{action}")
     async def account_action(aid: str, action: str, req: Request):
         store.require_admin(req)
