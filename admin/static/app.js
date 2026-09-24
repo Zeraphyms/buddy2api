@@ -45,6 +45,16 @@ function goPage(next) {
   if (next === "taskcenter") loadTaskCenter().catch(e => toast(e.message));
 }
 const fmtRate = v => v === null || v === undefined ? "—" : "x" + Number(v).toFixed(2);
+// 实测倍率常远小于官方值（上游打折/免费），固定两位会被截成 0.00。
+// 按量级自适应小数位，低价模型保留到 3~4 位，避免看起来像免费。
+const fmtMeasured = v => {
+  if (v === null || v === undefined) return "—";
+  const n = Number(v);
+  if (n === 0) return "x0";
+  if (Math.abs(n) < 0.01) return "x" + n.toFixed(4);
+  if (Math.abs(n) < 0.1) return "x" + n.toFixed(3);
+  return "x" + n.toFixed(2);
+};
 const fmtNum = v => v === null || v === undefined || v === "" ? "—" : Number(v).toLocaleString("zh-CN");
 async function loadModels() {
   $("models-body").innerHTML = '<tr><td colspan="9" class="history-empty">正在加载模型目录…</td></tr>';
@@ -155,14 +165,19 @@ function renderModels(data) {
     // 实测与官方明显背离时给出提示：以真实扣费为准
     let measured = "—";
     if (m.measured !== null && m.measured !== undefined) {
-      measured = `<span class="mono">${fmtRate(m.measured)}</span>`;
+      measured = `<span class="mono">${fmtMeasured(m.measured)}</span>`;
       const ref = m.official;
-      if (ref !== null && ref !== undefined && Math.abs(m.measured - ref) >= 0.02) {
-        measured = `<span class="mono" title="实测与官方倍率不一致，真实扣费以实测为准">${fmtRate(m.measured)} ⚠</span>`;
+      // 相对阈值：低价模型用固定阈值会满屏误报；官方为 0 时只在实测明显大于 0 时提示
+      if (ref !== null && ref !== undefined) {
+        const diff = Math.abs(m.measured - ref);
+        const thr = ref > 0 ? Math.max(ref * 0.2, 0.005) : 0.005;
+        if (diff >= thr) {
+          measured = `<span class="mono" title="实测与官方倍率不一致，真实扣费以实测为准">${fmtMeasured(m.measured)} ⚠</span>`;
+        }
       }
     }
     return `<tr>
-      <td class="mono muted">${m.region === "intl" ? "国际" : "国内"}</td>
+      <td>${m.region === "intl" ? '<span class="pill">国际</span>' : '<span class="pill">国内</span>'}</td>
       <td><strong>${esc(m.name)}</strong><small class="cell-note mono">${esc(m.id)}</small></td>
       <td>${official}</td>
       <td>${eff}</td>
