@@ -85,8 +85,8 @@
 推荐用 `uv`：
 
 ```bash
-git clone https://github.com/ShouZhuo0413/codebuddy2openai.git workbuddy2api
-cd workbuddy2api
+git clone https://github.com/Zeraphyms/buddy2api.git buddy2api
+cd buddy2api
 
 uv venv
 uv pip install -r requirements.txt
@@ -100,23 +100,47 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> 注意：无论是启动服务，还是执行 `python3 -m core.converter --help`，都必须先装依赖。
+> 注意：两种启动模式都需要先装依赖。`deploy-local` 脚本会自动使用项目内的 `.venv`。
 
 ### 3. 启动
 
-最常用的启动方式：
+项目有两种启动模式，**推荐用管理后台模式**。
+
+#### 模式 A：管理后台 + API（推荐）
 
 ```bash
-uv run python -m core.converter --desensitize --log converter.log
+python3 -m admin.server
 ```
 
-或：
+Windows 上也可以用 `deploy-local` 里的启动脚本（自带端口检查与 `.env` 加载）：
+
+```powershell
+deploy-local\start-admin.bat
+```
+
+这种模式包含**全部功能**：账号池轮转、浏览器授权添加账号、积分任务、
+任务中心、用量统计、模型与倍率。管理界面在 `http://127.0.0.1:8787/admin/`。
+
+首次启动前需要设置管理密钥（至少 20 位）与客户端 Key，可写入 `.env`：
+
+```ini
+ADMIN_KEY=<至少 20 位的随机串>
+CODEBUDDY2OPENAI_KEY=sk-wb-<随机串>
+PORT=8787
+```
+
+#### 模式 B：纯转换器（无管理后台）
 
 ```bash
 python3 -m core.converter --desensitize --log converter.log
 ```
 
-看到监听 `http://127.0.0.1:8787` 就说明已经起来了。
+只提供 API 转发，**不含管理后台**，因此任务系统、用量统计、模型档位等功能
+都不可用。适合只需要轻量转发、不需要多账号运维的场景。
+
+---
+
+两种模式都监听 `http://127.0.0.1:8787`，看到监听提示即表示启动成功。
 
 ### 4. 快速自检
 
@@ -138,7 +162,7 @@ curl http://127.0.0.1:8787/v1/models
 推荐启动命令：
 
 ```bash
-uv run python -m core.converter --desensitize --log converter.log
+python3 -m admin.server
 ```
 
 把下面配置合并到 `~/.codex/config.toml`：
@@ -181,7 +205,7 @@ Claude Code 不走 OpenAI 协议，而是走 Anthropic Messages。
 推荐启动命令：
 
 ```bash
-uv run python -m core.converter --desensitize --log converter.log
+python3 -m admin.server
 ```
 
 在 CC Switch 里配置：
@@ -225,6 +249,21 @@ uv run python -m core.converter --desensitize --log converter.log
 
 ### 基本启动
 
+管理后台 + API（推荐，含全部功能）：
+
+```bash
+python3 -m admin.server
+```
+
+Windows 可用 `deploy-local` 脚本：
+
+```powershell
+deploy-local\start-admin.bat      # 启动（含端口检查与 .env 加载）
+deploy-local\stop.ps1             # 停止
+```
+
+纯转换器（无管理后台，仅 API 转发）：
+
 ```bash
 python3 -m core.converter
 python3 -m core.converter --desensitize
@@ -266,7 +305,7 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
 ### 推荐启动方式
 
 ```bash
-uv run python -m core.converter --desensitize --log converter.log
+python3 -m admin.server
 ```
 
 ### 日志里能看到什么
@@ -561,12 +600,12 @@ Recommended use cases:
 ### Quick Start
 
 ```bash
-git clone https://github.com/ShouZhuo0413/codebuddy2openai.git workbuddy2api
-cd workbuddy2api
+git clone https://github.com/Zeraphyms/buddy2api.git buddy2api
+cd buddy2api
 
 uv venv
 uv pip install -r requirements.txt
-uv run python -m core.converter --desensitize --log converter.log
+python3 -m admin.server
 ```
 
 Then verify:
@@ -578,7 +617,8 @@ curl http://127.0.0.1:8787/v1/models
 
 ### Codex CLI
 
-Use `/v1/responses` and keep `--desensitize` enabled.
+Use `/v1/responses`. Run the admin server (`python3 -m admin.server`) so the
+account pool and management console are available.
 
 ```toml
 [model_providers.workbuddy]
