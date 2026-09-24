@@ -23,6 +23,36 @@ CATALOG_TTL = 3600
 # 偏离数倍。低于该 token 量只展示原始累计，不给出实测倍率。
 MEASURED_MIN_TOKENS = 2000
 
+# 手动规格兜底：上游目录与 models.dev 都没给规格的模型，按同系列模型
+# 人工补齐（键为 model id，两区通用）。仅影响展示，不参与计费。
+MANUAL_SPECS = {
+    # hy4-preview-f 是 hy4-preview 的变体，规格与之相同
+    "hy4-preview-f": {
+        "name": "Hy4 preview",
+        "context_length": 1000000,
+        "max_output_tokens": 64000,
+        "supports_images": True,
+        "supports_tools": True,
+        "supports_reasoning": True,
+        "can_disable_thinking": False,
+        "default_effort": "high",
+        "effort_options": ["high"],
+        "description": "混元思考模型，具有增强的推理能力（hy4-preview 变体）",
+    },
+    # hy4-preview-x 同属 hy4-preview 系列
+    "hy4-preview-x": {
+        "name": "Hy4 preview",
+        "context_length": 1000000,
+        "max_output_tokens": 64000,
+        "supports_images": True,
+        "supports_tools": True,
+        "supports_reasoning": True,
+        "can_disable_thinking": False,
+        "default_effort": "high",
+        "effort_options": ["high"],
+        "description": "混元思考模型，具有增强的推理能力（hy4-preview 变体）",
+    },
+}
 
 
 # 上游上下文长度有两种形态：数字，或 {defaultLength, supportedLengths}。
@@ -436,13 +466,17 @@ class ModelRates:
                 )
                 extra = fallback(mid) if callable(fallback) else None
                 extra = extra if isinstance(extra, dict) else {}
+                manual = MANUAL_SPECS.get(mid) or {}
                 if ctx is None and extra.get("context_length"):
                     ctx = int(extra["context_length"])
                     ctx_from_fallback = True
+                elif ctx is None and manual.get("context_length"):
+                    ctx = int(manual["context_length"])
+                    ctx_from_fallback = False
                 else:
                     ctx_from_fallback = False
                 max_out = (model.get("maxOutputTokens") or model.get("max_output_tokens")
-                          or extra.get("max_output_tokens"))
+                          or extra.get("max_output_tokens") or manual.get("max_output_tokens"))
                 measured = None
                 # credit 精度 0.01，token 太少时实测值不可信
                 if bucket and bucket.get("tokens", 0) >= MEASURED_MIN_TOKENS:
@@ -482,9 +516,12 @@ class ModelRates:
             if (region, mid) in known:
                 continue
             tokens = bucket.get("tokens", 0)
-            # 目录外模型：上游没给规格，用 models.dev 补齐上下文、档位与能力。
+            # 目录外模型：上游没给规格，先用 models.dev 补，再用手动表补。
             extra = fallback(mid) if callable(fallback) else None
-            extra = extra if isinstance(extra, dict) else {}
+            extra = dict(extra) if isinstance(extra, dict) else {}
+            manual = MANUAL_SPECS.get(mid) or {}
+            for k, v in manual.items():
+                extra.setdefault(k, v)
             ctx, ctx_default, ctx_options = context_window(
                 extra.get("context_length"), extra.get("context_length")
             )
@@ -499,14 +536,14 @@ class ModelRates:
                 "context_lengths": ctx_options,
                 "max_output_tokens": extra.get("max_output_tokens"),
                 "is_default": False, "uncatalogued": True,
-                "meta_source": "models.dev" if extra else None,
+                "meta_source": ("models.dev" if extra else None) or ("manual" if manual else None),
                 "supports_images": extra.get("supports_images"),
                 "supports_tools": extra.get("supports_tools"),
                 "description": extra.get("description"),
                 "supports_reasoning": extra.get("supports_reasoning"),
                 "only_reasoning": None,
                 "can_disable_thinking": extra.get("can_disable_thinking"),
-                "default_effort": None,
+                "default_effort": manual.get("default_effort"),
                 "default_summary": None,
                 "effort_options": list(extra.get("effort_options") or []),
             })
