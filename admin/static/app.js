@@ -138,20 +138,36 @@ function renderModels(data) {
     return;
   }
   $("models-body").innerHTML = rows.map(m => {
-    const free = m.effective === 0;
-    const eff = m.uncatalogued
+    // 官方倍率 = 上游 credits 原值（上游会把促销价直接写进 credits）
+    const official = m.uncatalogued
       ? '<span class="pill amber" title="可调用，但不在上游目录中">目录外</span>'
-      : free
+      : m.official === 0
         ? '<span class="pill green">免费</span>'
+        : `<span class="mono">${fmtRate(m.official)}</span>`;
+    // 实际生效：仅在促销改变了价格时才显示，避免与官方列重复
+    let eff = "—";
+    if (!m.uncatalogued && m.promo && m.effective !== null && m.effective !== undefined) {
+      eff = m.effective === 0
+        ? '<span class="pill green">促销免费</span>'
         : `<span class="mono">${fmtRate(m.effective)}</span>`;
+    }
     const promo = m.promo ? `<span class="pill green" title="${esc(m.promo_note || "")}">${esc(m.promo)}</span>` : "—";
+    // 实测与官方明显背离时给出提示：以真实扣费为准
+    let measured = "—";
+    if (m.measured !== null && m.measured !== undefined) {
+      measured = `<span class="mono">${fmtRate(m.measured)}</span>`;
+      const ref = m.official;
+      if (ref !== null && ref !== undefined && Math.abs(m.measured - ref) >= 0.02) {
+        measured = `<span class="mono" title="实测与官方倍率不一致，真实扣费以实测为准">${fmtRate(m.measured)} ⚠</span>`;
+      }
+    }
     return `<tr>
       <td class="mono muted">${m.region === "intl" ? "国际" : "国内"}</td>
       <td><strong>${esc(m.name)}</strong><small class="cell-note mono">${esc(m.id)}</small></td>
-      <td class="mono">${m.uncatalogued ? "—" : fmtRate(m.official)}</td>
+      <td>${official}</td>
       <td>${eff}</td>
       <td>${promo}</td>
-      <td class="mono">${m.measured === null || m.measured === undefined ? "—" : fmtRate(m.measured)}</td>
+      <td>${measured}</td>
       <td class="mono">${m.tokens ? fmtNum(m.tokens) : "—"}</td>
       <td class="mono col-nowrap">${fmtCtx(m)}</td>
       <td class="col-wrap">${fmtOptions(m)}</td>

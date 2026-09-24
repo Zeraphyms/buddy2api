@@ -418,15 +418,15 @@ class ModelRates:
                 mid = model.get("id")
                 if not mid:
                     continue
+                # 倍率一律以上游 credits 原值为准：上游会把促销价直接写进
+                # credits（如限时免费返回 "x0.00"），故不再自行套一层促销推导，
+                # 否则 official 与 effective 语义重复且掩盖上游本意。
                 official = parse_multiplier(model.get("credits"))
                 promo = active_promotion(mid, promotions)
                 effective = official
                 promo_label = None
                 promo_note = None
                 if promo:
-                    factor = (promo.get("discount") or {}).get("factor")
-                    if isinstance(factor, (int, float)) and not isinstance(factor, bool):
-                        effective = float(factor)
                     promo_label = (promo.get("badge") or {}).get("label")
                     promo_note = (promo.get("hover") or {}).get("textZh")
                 bucket = usage.get(f"{region}:{mid}")
