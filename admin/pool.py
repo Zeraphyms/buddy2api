@@ -169,7 +169,8 @@ class AccountPool:
             if status in (401, 403):
                 data.update(cooldown_until=self.clock() + 300, last_error="上游认证或访问被拒绝，已冷却 5 分钟")
             elif status in (402, 429):
-                data.update(cooldown_until=self.clock() + 1800, last_error="上游额度或频率限制，已冷却 30 分钟")
+                # 限流冷却：实测多为频率上限（额度仍在），5 分钟足够恢复。
+                data.update(cooldown_until=self.clock() + 300, last_error="上游额度或频率限制，已冷却 5 分钟")
             self.store.save()
 
     def billing(self, client, headers, path, body=None):
@@ -396,6 +397,18 @@ class AccountPool:
     def queue_status(self):
         """队列实时状态。"""
         return self.task_center().state.snapshot()
+
+    def clear_cooldown(self, aid):
+        """手动取消冷却：清掉冷却时间与错误标记，让账号立即回到可用池。
+
+        适用场景：上游限流已恢复但本地冷却尚未到期。
+        """
+        with self.operation_lock(aid):
+            item, _ = self.snapshot(aid)
+            if not item.get("enabled"):
+                return {"id": aid, "ok": False, "message": "账号已暂停，请先恢复"}
+            self.update(aid, cooldown_until=0, last_error=None)
+            return {"id": aid, "ok": True, "message": "已取消冷却，账号恢复可用"}
 
     def operate(self, aid, action):
         with self.operation_lock(aid):

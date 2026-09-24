@@ -775,6 +775,12 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
         store.require_admin(req)
         return pool.queue_status()
 
+    @app.post("/admin/api/accounts/{aid}/cooldown/clear")
+    async def account_clear_cooldown(aid: str, req: Request):
+        """手动取消账号冷却（上游限流已恢复时使用）。"""
+        store.require_admin(req)
+        return await asyncio.to_thread(pool.clear_cooldown, aid)
+
     @app.post("/admin/api/accounts/{aid}/actions/{action}")
     async def account_action(aid: str, action: str, req: Request):
         store.require_admin(req)
