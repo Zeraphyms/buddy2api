@@ -55,6 +55,64 @@ def context_window(value, ceiling=None):
     return top, default, options
 
 
+def reasoning_merged(model, extra):
+    """思考档位：上游优先，缺失时用 models.dev 的能力标记兜底。"""
+    profile = reasoning_profile(model)
+    if not profile["supports_reasoning"] and extra.get("supports_reasoning"):
+        profile["supports_reasoning"] = True
+        if profile["can_disable_thinking"] is None:
+            profile["can_disable_thinking"] = None
+    return profile
+
+
+def reasoning_profile(model):
+    """思考档位画像：支持、可否关闭、上游默认档与摘要设置。"""
+    supports = bool(model.get("supportsReasoning"))
+    only = bool(model.get("onlyReasoning"))
+    disable = model.get("canDisableThinking")
+    if isinstance(disable, bool):
+        can_off = disable
+    else:
+        can_off = supports and not only
+    reasoning = model.get("reasoning")
+    effort = summary = None
+    if isinstance(reasoning, dict):
+        raw_effort = reasoning.get("effort")
+        raw_summary = reasoning.get("summary")
+        effort = raw_effort if isinstance(raw_effort, str) and raw_effort else None
+        summary = raw_summary if isinstance(raw_summary, str) and raw_summary else None
+    return {
+        "supports_reasoning": supports,
+        "only_reasoning": only,
+        "can_disable_thinking": can_off,
+        "default_effort": effort,
+        "default_summary": summary,
+    }
+
+
+def parse_multiplier(value):
+    """把 'x0.79 credits' / 'x0.00' / 0.79 解析成 float；无法解析返回 None。"""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    if text.startswith("x"):
+        text = text[1:]
+    digits = ""
+    for ch in text:
+        if ch.isdigit() or ch == ".":
+            digits += ch
+        else:
+            break
+    if not digits or digits == ".":
+        return None
+    try:
+        return float(digits)
+    except ValueError:
+        return None
+
+
 def _parse_time(value):
     if not isinstance(value, str) or not value:
         return None
@@ -134,8 +192,15 @@ class ModelRates:
             return {k: dict(v) for k, v in self.store.data["model_usage"].items()}
 
     def model_ids(self, region):
-        """某区域的模型清单：以权威表为准（与客户端一致）。"""
-        return list(modelregistry.model_ids(region))
+        """某区域上游目录里的模型 ID 列表（目录未拉到时返回空）。
+
+        上游目录是模型清单与参数的权威来源；权威表只用于补充探测候选
+        （目录未登记但实际可用的模型，如国际版 gpt-6-astra）。
+        """
+        with self.lock:
+            entry = self.catalogs.get(region) or {}
+        return [m.get("id") for m in (entry.get("models") or [])
+                if isinstance(m, dict) and m.get("id")]
 
     def catalog_ids(self, regions=("cn", "intl")):
         """两区目录的并集（仅作候选池，不代表某账号可用）。"""
@@ -189,15 +254,16 @@ class ModelRates:
     def models_for_account(self, aid, region):
         """某账号实际可用的模型。
 
-        基线 = 该区域权威表（与客户端一致的清单）；再剔除实测返回 11102
-        （不可用）的模型、叠加实测确认可用的模型。
+        基线 = 该账号所在区域的上游目录；再叠加实测可用的模型
+        （国际账号的 gpt-6-astra 就不在其目录里），
+        并剔除实测返回 11102 的模型。
         """
         ok, no = self.learned(aid)
         result = []
-        for mid in modelregistry.model_ids(region):
+        for mid in self.model_ids(region):
             if mid not in no and mid not in result:
                 result.append(mid)
-        # 实测可用的模型（权威表外也可能存在）
+        # 实测可用的模型（可能在目录外，如 gpt-6-astra）
         for mid in ok:
             if mid not in no and mid not in result:
                 result.append(mid)
@@ -215,13 +281,20 @@ class ModelRates:
     def probe_candidates(self, aid, region, limit=None):
         """待探测的候选模型：候选池 − 已确认可用 − 已确认不可用。
 
-        候选池来自三处并集：本区域上游目录、两区目录并集、内置知识表。
-        只靠上游目录会漏掉未登记但可调用的模型（如国际版 gpt-6-astra）。
+        候选池来自三处并集：本区域上游目录、两区目录并集、权威表。
+        只靠上游目录会漏掉未登记但可调用的模型（如国际版 gpt-6-astra），
+        故权威表优先排在前面，避免按 limit 分片探测时长期轮不到它们。
         """
         ok, no = self.learned(aid)
         known = set(ok) | set(no)
         candidates = []
         for mid in modelregistry.model_ids(region):
+            if mid not in known and mid not in candidates:
+                candidates.append(mid)
+        for mid in self.model_ids(region):
+            if mid not in known and mid not in candidates:
+                candidates.append(mid)
+        for mid in self.catalog_ids():
             if mid not in known and mid not in candidates:
                 candidates.append(mid)
         return candidates[:limit] if limit else candidates
@@ -332,24 +405,20 @@ class ModelRates:
         return self.refresh(cred, domain)
 
     def snapshot(self, fallback=None):
-        """模型清单与参数以权威表为准，上游目录只补充促销与实测数据。
-
-        上游目录接口返回的清单与客户端不一致（含已下线旧模型、缺少部分
-        实际可用模型），参数也常与客户端不符。故清单与参数取自
-        modelregistry（与客户端对齐），上游目录仅用于：
-          - modelPromotions 促销（限时免费等）
-          - 实测扣费累计（usage）
-        """
+        """合并静态目录与实测数据，供管理后台展示。"""
         with self.lock:
             catalogs = {k: dict(v) for k, v in self.catalogs.items()}
         usage = self.usage_rows()
         rows = []
-        for region in ("cn", "intl"):
-            promotions = (catalogs.get(region) or {}).get("promotions") or []
-            for mid in modelregistry.model_ids(region):
-                spec = modelregistry.metadata(region, mid) or {}
-                model = {}  # 权威表为准，上游规格不再采用
-                official = spec.get("credit")
+        for region, entry in catalogs.items():
+            promotions = entry.get("promotions") or []
+            for model in entry.get("models") or []:
+                if not isinstance(model, dict):
+                    continue
+                mid = model.get("id")
+                if not mid:
+                    continue
+                official = parse_multiplier(model.get("credits"))
                 promo = active_promotion(mid, promotions)
                 effective = official
                 promo_label = None
@@ -361,13 +430,27 @@ class ModelRates:
                     promo_label = (promo.get("badge") or {}).get("label")
                     promo_note = (promo.get("hover") or {}).get("textZh")
                 bucket = usage.get(f"{region}:{mid}")
+                ctx, ctx_default, ctx_options = context_window(
+                    model.get("contextWindow"),
+                    model.get("maxAllowedSize") or model.get("maxInputTokens"),
+                )
+                extra = fallback(mid) if callable(fallback) else None
+                extra = extra if isinstance(extra, dict) else {}
+                if ctx is None and extra.get("context_length"):
+                    ctx = int(extra["context_length"])
+                    ctx_from_fallback = True
+                else:
+                    ctx_from_fallback = False
+                max_out = (model.get("maxOutputTokens") or model.get("max_output_tokens")
+                          or extra.get("max_output_tokens"))
                 measured = None
+                # credit 精度 0.01，token 太少时实测值不可信
                 if bucket and bucket.get("tokens", 0) >= MEASURED_MIN_TOKENS:
                     measured = round(bucket["credit"] / (bucket["tokens"] / 1000), 4)
                 rows.append({
                     "region": region,
                     "id": mid,
-                    "name": spec.get("name") or mid,
+                    "name": model.get("name") or mid,
                     "official": official,
                     "effective": effective,
                     "promo": promo_label,
@@ -376,24 +459,57 @@ class ModelRates:
                     "tokens": (bucket or {}).get("tokens", 0),
                     "credit": (bucket or {}).get("credit", 0),
                     "samples": (bucket or {}).get("samples", 0),
-                    "context_length": spec.get("context_length"),
-                    "context_default_length": None,
-                    "context_lengths": [],
-                    "max_output_tokens": spec.get("max_output_tokens"),
-                    "meta_source": "registry",
-                    "is_default": False,
-                    "supports_images": spec.get("supports_images"),
-                    "supports_tools": spec.get("supports_tool_call"),
-                    "description": spec.get("description"),
-                    "supports_reasoning": spec.get("supports_reasoning"),
-                    "only_reasoning": spec.get("supports_reasoning")
-                        and not spec.get("can_disable_thinking"),
-                    "can_disable_thinking": spec.get("can_disable_thinking"),
-                    "default_effort": spec.get("default_effort"),
-                    "default_summary": None,
-                    "effort_options": list(spec.get("supported_efforts") or []),
+                    "context_length": ctx,
+                    "context_default_length": ctx_default,
+                    "context_lengths": ctx_options,
+                    "max_output_tokens": max_out,
+                    "meta_source": "models.dev" if ctx_from_fallback else None,
+                    "is_default": bool(model.get("isDefault")),
+                    "supports_images": model.get("supportsImages") if model.get("supportsImages") is not None else extra.get("supports_images"),
+                    "supports_tools": model.get("supportsToolCall") if model.get("supportsToolCall") is not None else extra.get("supports_tools"),
+                    "description": (model.get("descriptionZh") or model.get("descriptionEn") or extra.get("description")),
+                    **reasoning_merged(model, extra),
+                    "effort_options": list(extra.get("effort_options") or []),
                 })
         rows.sort(key=lambda r: (r["region"], r["official"] is None, r["official"] or 0))
+        # 有些模型可实际调用但不在上游目录里（例如国际版的 deepseek 系列），
+        # 单列出来避免用户误以为不可用。
+        known = {(r["region"], r["id"]) for r in rows}
+        for key, bucket in usage.items():
+            if ":" not in key:
+                continue
+            region, mid = key.split(":", 1)
+            if (region, mid) in known:
+                continue
+            tokens = bucket.get("tokens", 0)
+            # 目录外模型：上游没给规格，用 models.dev 补齐上下文、档位与能力。
+            extra = fallback(mid) if callable(fallback) else None
+            extra = extra if isinstance(extra, dict) else {}
+            ctx, ctx_default, ctx_options = context_window(
+                extra.get("context_length"), extra.get("context_length")
+            )
+            rows.append({
+                "region": region, "id": mid,
+                "name": extra.get("name") or mid,
+                "official": None, "effective": None, "promo": None, "promo_note": None,
+                "measured": round(bucket["credit"] / (tokens / 1000), 4) if tokens >= MEASURED_MIN_TOKENS else None,
+                "tokens": tokens, "credit": bucket.get("credit", 0),
+                "samples": bucket.get("samples", 0),
+                "context_length": ctx, "context_default_length": ctx_default,
+                "context_lengths": ctx_options,
+                "max_output_tokens": extra.get("max_output_tokens"),
+                "is_default": False, "uncatalogued": True,
+                "meta_source": "models.dev" if extra else None,
+                "supports_images": extra.get("supports_images"),
+                "supports_tools": extra.get("supports_tools"),
+                "description": extra.get("description"),
+                "supports_reasoning": extra.get("supports_reasoning"),
+                "only_reasoning": None,
+                "can_disable_thinking": extra.get("can_disable_thinking"),
+                "default_effort": None,
+                "default_summary": None,
+                "effort_options": list(extra.get("effort_options") or []),
+            })
         return {
             "models": rows,
             "min_measured_tokens": MEASURED_MIN_TOKENS,
