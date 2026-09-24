@@ -1,0 +1,5 @@
+# 保护本地敏感文件，避免误提交到 git
+auth/
+management/
+.env
+*.log
