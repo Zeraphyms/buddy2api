@@ -61,6 +61,16 @@ MANUAL_SPECS = {
 MANUAL_OVERRIDES = {
     "cn:deepseek-v4.1-flash": {"max_output_tokens": 393216},
     "cn:deepseek-v4-pro": {"max_output_tokens": 393216},
+    # 以下取自参考面板（已人工核对），修正上游偏小的最大输出 / 上下文
+    "cn:glm-5.2": {"max_output_tokens": 131072},
+    "cn:glm-5.3": {"max_output_tokens": 131072},
+    "cn:glm-5v-turbo": {"max_output_tokens": 131072},
+    "cn:kimi-k2.6": {"max_output_tokens": 262144},
+    "cn:kimi-k2.7": {"max_output_tokens": 262144},
+    "cn:kimi-k3-1": {"max_output_tokens": 1048576},
+    "cn:minimax-m3": {"max_output_tokens": 524288},
+    "intl:deep-model": {"context_length": 176000},
+    "intl:default-model": {"context_length": 176000},
 }
 
 
@@ -486,8 +496,11 @@ class ModelRates:
                     ctx_from_fallback = False
                 max_out = (model.get("maxOutputTokens") or model.get("max_output_tokens")
                           or extra.get("max_output_tokens") or manual.get("max_output_tokens"))
-                max_out = (MANUAL_OVERRIDES.get(f"{region}:{mid}") or {}).get(
-                    "max_output_tokens", max_out)
+                ov = MANUAL_OVERRIDES.get(f"{region}:{mid}") or {}
+                if ov.get("context_length"):
+                    ctx = ov["context_length"]
+                    ctx_from_fallback = False
+                max_out = ov.get("max_output_tokens", max_out)
                 measured = None
                 # credit 精度 0.01，token 太少时实测值不可信
                 if bucket and bucket.get("tokens", 0) >= MEASURED_MIN_TOKENS:
@@ -533,6 +546,9 @@ class ModelRates:
             manual = MANUAL_SPECS.get(mid) or {}
             for k, v in manual.items():
                 extra.setdefault(k, v)
+            ov = MANUAL_OVERRIDES.get(f"{region}:{mid}") or {}
+            if ov.get("context_length"):
+                extra["context_length"] = ov["context_length"]
             ctx, ctx_default, ctx_options = context_window(
                 extra.get("context_length"), extra.get("context_length")
             )
