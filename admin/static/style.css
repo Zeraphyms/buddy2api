@@ -13,7 +13,11 @@
 .models-regions{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:16px}
 .models-surface{border-radius:var(--radius)}
 .models-surface td{white-space:normal;vertical-align:top}
-.models-surface td:first-child,.models-surface td:nth-child(3),.models-surface td:nth-child(4),.models-surface td:nth-child(5),.models-surface td:nth-child(6),.models-surface td:nth-child(7),.models-surface td:nth-child(8),.models-surface td:nth-child(9){white-space:nowrap}
+.models-surface td{white-space:normal;vertical-align:top}
+.models-surface td.col-nowrap{white-space:nowrap}
+.models-surface td.col-wrap{white-space:normal;min-width:190px}
+.models-surface td:first-child{white-space:nowrap}
+.models-surface td:nth-child(3),.models-surface td:nth-child(4),.models-surface td:nth-child(5),.models-surface td:nth-child(6),.models-surface td:nth-child(7){white-space:nowrap}
 .models-foot{font-size:11px;margin:16px 0 30px;max-width:900px;line-height:1.9}
 @media(max-width:760px){.models-head{flex-direction:column}.models-actions{width:100%}.models-actions .secondary{flex:1}}
 .key-reveal{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -103,3 +107,10 @@
   .tc-item{grid-template-columns:minmax(0,1fr) 70px;row-gap:4px}
   .tc-item-msg{grid-column:1/-1;white-space:normal}
 }
+
+/* 模型表：档位 chip 允许换行，避免撑破表格导致后续列错位 */
+.models-surface td.col-wrap .effort-chip{display:inline-block;margin:0 4px 4px 0}
+.models-surface td.col-wrap{white-space:normal}
+.models-surface td.col-nowrap .cell-note{display:block;font-size:10px;color:#8a9490}
+.effort-chip{display:inline-block;background:#eef2ea;color:#4a6b51;border:1px solid #dde6d8;border-radius:5px;padding:2px 7px;font-size:10px;font-family:Consolas,monospace;margin-right:4px}
+.effort-chip.off{background:#f6f1e8;color:#8a6a3c;border-color:#eadfcb}

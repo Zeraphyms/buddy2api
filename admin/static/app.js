@@ -116,13 +116,6 @@ function renderModels(data) {
     }
     return note ? `${top} <small class="cell-note mono">${note}</small>` : top;
   };
-  // 默认档：上游 reasoning.effort；缺失时标自适应。
-  const fmtEffort = m => {
-    if (m.supports_reasoning === null || m.supports_reasoning === undefined) return "—";
-    if (!m.supports_reasoning) return '<span class="muted">不支持</span>';
-    const def = m.default_reasoning_effort || "自适应";
-    return `<span class="pill green">${esc(def)}</span>`;
-  };
   // 支持的档位：上游不给列表，用 models.dev 档位众数；可关思考时补一个 off。
   const fmtOptions = m => {
     if (!m.supports_reasoning) return "—";
@@ -160,10 +153,9 @@ function renderModels(data) {
       <td>${promo}</td>
       <td class="mono">${m.measured === null || m.measured === undefined ? "—" : fmtRate(m.measured)}</td>
       <td class="mono">${m.tokens ? fmtNum(m.tokens) : "—"}</td>
-      <td class="mono">${fmtCtx(m)}</td>
-      <td>${fmtEffort(m)}</td>
-      <td>${fmtOptions(m)}</td>
-      <td class="mono">${fmtNum(m.max_output_tokens)}</td>
+      <td class="mono col-nowrap">${fmtCtx(m)}</td>
+      <td class="col-wrap">${fmtOptions(m)}</td>
+      <td class="mono col-nowrap">${fmtNum(m.max_output_tokens)}</td>
     </tr>`;
   }).join("");
 }
