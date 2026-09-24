@@ -54,6 +54,15 @@ MANUAL_SPECS = {
     },
 }
 
+# 手动修正：上游目录给了值但填错，需要强制覆盖（键为 region:id）。
+# 上游对 deepseek 系列批量填了 128000，与客户端下发的真实输出窗口不符；
+# 实测请求 max_tokens 超过 128000 上游正常返回，确认该值偏保守。
+# 仅影响展示，不参与计费。
+MANUAL_OVERRIDES = {
+    "cn:deepseek-v4.1-flash": {"max_output_tokens": 393216},
+    "cn:deepseek-v4-pro": {"max_output_tokens": 393216},
+}
+
 
 # 上游上下文长度有两种形态：数字，或 {defaultLength, supportedLengths}。
 # 后者表示「多个可选档位」——例如默认 300K、可选到 1M。对外按上限
@@ -477,6 +486,8 @@ class ModelRates:
                     ctx_from_fallback = False
                 max_out = (model.get("maxOutputTokens") or model.get("max_output_tokens")
                           or extra.get("max_output_tokens") or manual.get("max_output_tokens"))
+                max_out = (MANUAL_OVERRIDES.get(f"{region}:{mid}") or {}).get(
+                    "max_output_tokens", max_out)
                 measured = None
                 # credit 精度 0.01，token 太少时实测值不可信
                 if bucket and bucket.get("tokens", 0) >= MEASURED_MIN_TOKENS:
@@ -534,7 +545,8 @@ class ModelRates:
                 "samples": bucket.get("samples", 0),
                 "context_length": ctx, "context_default_length": ctx_default,
                 "context_lengths": ctx_options,
-                "max_output_tokens": extra.get("max_output_tokens"),
+                "max_output_tokens": (MANUAL_OVERRIDES.get(f"{region}:{mid}") or {}).get(
+                    "max_output_tokens", extra.get("max_output_tokens")),
                 "is_default": False, "uncatalogued": True,
                 "meta_source": ("models.dev" if extra else None) or ("manual" if manual else None),
                 "supports_images": extra.get("supports_images"),
