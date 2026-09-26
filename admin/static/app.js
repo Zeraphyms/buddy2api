@@ -744,62 +744,92 @@ function renderUsageSeries(series) {
     win.textContent = "";
     return;
   }
-  const hm = t => new Date(t * 1000).toLocaleTimeString("zh-CN",
-    { hour: "2-digit", minute: "2-digit", hour12: false });
-  const hmFull = t => {
+  // 原始采样是「有请求的那一分钟」各一个点，稀疏且间隔不均，直接按分钟铺开
+  // 会挤成一条线（43 小时仅约二百个点）。按整点聚合后再绘制，趋势才看得清。
+  const HOUR = 3600;
+  const hours = new Map();
+  series.forEach(p => {
+    const key = Math.floor(p.t / HOUR) * HOUR;
+    const e = hours.get(key) || { t: key, prompt: 0, completion: 0, requests: 0 };
+    e.prompt += p.prompt || 0;
+    e.completion += p.completion || 0;
+    e.requests += p.requests || 0;
+    hours.set(key, e);
+  });
+  const bars = [...hours.values()].sort((a, b) => a.t - b.t);
+  const t0 = bars[0].t, tN = bars[bars.length - 1].t + HOUR;
+  const span = Math.max(HOUR, tN - t0);
+
+  const dstr = t => {
     const d = new Date(t * 1000);
-    return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " " + hm(t);
+    return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) +
+      " " + String(d.getHours()).padStart(2, "0") + ":00";
   };
-  const peak = Math.max(1, ...series.map(p => (p.prompt || 0) + (p.completion || 0)));
-  // 纵轴上限向上取整到易读刻度
+  const peak = Math.max(1, ...bars.map(b => b.prompt + b.completion));
   const niceMax = (() => {
     const raw = peak * 1.1;
     const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    const steps = [1, 2, 2.5, 5, 10];
-    for (const s of steps) if (raw <= s * mag) return s * mag;
+    for (const s of [1, 2, 2.5, 5, 10]) if (raw <= s * mag) return s * mag;
     return 10 * mag;
   })();
-  const ticks = [niceMax, niceMax / 2, 0];
 
-  // 横轴：最多标 5 个时间点，避免拥挤
-  const n = series.length;
-  const labelIdx = n <= 5 ? series.map((_, i) => i)
-    : [0, Math.round((n - 1) / 3), Math.round((n - 1) * 2 / 3), n - 1];
-  const uniqIdx = [...new Set(labelIdx)];
-
-  const bars = series.map((p, i) => {
-    const prompt = p.prompt || 0, completion = p.completion || 0;
-    const total = prompt + completion;
-    const hp = (prompt / niceMax) * 100, hc = (completion / niceMax) * 100;
-    const tip = hmFull(p.t) + " · 合计 " + fmtTokens(total) +
-      "（prompt " + fmtTokens(prompt) + " / completion " + fmtTokens(completion) + "）· 请求 " + (p.requests || 0);
-    return '<div class="spark-col" data-tip="' + esc(tip) + '" tabindex="0" aria-label="' + esc(tip) + '">' +
-      '<span class="spark-bar completion" style="height:' + hc.toFixed(2) + '%"></span>' +
-      '<span class="spark-bar prompt" style="height:' + hp.toFixed(2) + '%"></span>' +
-      '</div>';
+  const cols = bars.map(b => {
+    const leftPct = ((b.t - t0) / span) * 100;
+    const widthPct = (HOUR / span) * 100;
+    const total = b.prompt + b.completion;
+    // 绘图区高 158px；completion 通常只有 prompt 的千分之一，按比例是 0 像素，
+    // 故给它一个最小可见高度（非零值至少 4px），保证图上看得见、悬停可读原值。
+    const PLOT_H = 158, MIN_PX = 4;
+    let hp = (b.prompt / niceMax) * 100;
+    let hc = (b.completion / niceMax) * 100;
+    if (b.prompt > 0) hp = Math.max(hp, (MIN_PX / PLOT_H) * 100);
+    if (b.completion > 0) hc = Math.max(hc, (MIN_PX / PLOT_H) * 100);
+    const tip = dstr(b.t) + "\u2009\u00b7\u2009\u5408\u8ba1 " + fmtTokens(total) +
+      "\uff08prompt " + fmtTokens(b.prompt) + " / completion " + fmtTokens(b.completion) +
+      "\uff09\u2009\u00b7\u2009\u8bf7\u6c42 " + b.requests;
+    // 注意：管理后台的 CSP 为 style-src 'self'，HTML 里的 style 属性会被拦掉，
+    // 故尺寸通过 CSSOM（element.style）设置——那不受 CSP 限制。
+    return '<div class="spark-col" data-left="' + leftPct.toFixed(3) + '" data-width="' + widthPct.toFixed(3) +
+      '" data-hc="' + hc.toFixed(2) + '" data-hp="' + hp.toFixed(2) +
+      '" data-tip="' + esc(tip) + '" tabindex="0" aria-label="' + esc(tip) + '">' +
+      '<span class="spark-bar completion"></span>' +
+      '<span class="spark-bar prompt"></span>' +
+      "</div>";
   }).join("");
 
-  const yAxis = ticks.map(v =>
+  // 横轴：按整点范围取 5 个刻度
+  const xTicks = [0, 1, 2, 3, 4].map(k => {
+    const t = t0 + (span * k) / 4;
+    return '<span class="spark-xlabel" data-left="' + (k * 25) + '">' + esc(dstr(t)) + "</span>";
+  }).join("");
+  const yAxis = [niceMax, niceMax / 2, 0].map(v =>
     '<span class="spark-tick">' + esc(fmtTokens(v)) + "</span>").join("");
 
   body.innerHTML =
     '<div class="spark-wrap">' +
       '<div class="spark-axis-y" aria-hidden="true">' + yAxis + "</div>" +
       '<div class="spark-plot" id="spark-plot">' +
-        '<div class="spark-grid" aria-hidden="true">' +
-          '<i></i><i></i><i></i>' +
-        "</div>" +
-        '<div class="spark-bars">' + bars + "</div>" +
+        '<div class="spark-grid" aria-hidden="true"><i></i><i></i><i></i></div>' +
+        '<div class="spark-bars">' + cols + "</div>" +
+        '<div class="spark-hover" id="spark-hover" hidden></div>' +
       "</div>" +
     "</div>" +
-    '<div class="spark-axis-x">' +
-      uniqIdx.map(i =>
-        '<span class="spark-xlabel" style="left:' +
-        (n > 1 ? (i / (n - 1)) * 100 : 50).toFixed(2) + '%">' + esc(hm(series[i].t)) + "</span>").join("") +
-    "</div>" +
-    '<div class="spark-hover" id="spark-hover" hidden></div>';
-  win.innerHTML = esc(hmFull(series[0].t)) + " \u2013 " + esc(hmFull(series[n - 1].t)) +
-    ' \u00b7 \u5cf0\u503c ' + esc(fmtTokens(peak)) + '/min \u00b7 \u6bcf\u67f1 1 \u5206\u949f';
+    '<div class="spark-axis-x">' + xTicks + "</div>";
+  win.innerHTML = esc(dstr(t0)) + " \u2013 " + esc(dstr(bars[bars.length - 1].t)) +
+    ' \u00b7 \u5cf0\u503c ' + esc(fmtTokens(peak)) + "/h \u00b7 \u6bcf\u67f1 1 \u5c0f\u65f6";
+
+  // 尺寸用 CSSOM 设置（CSP 会拦掉 HTML 的 style 属性）
+  body.querySelectorAll(".spark-col").forEach(el => {
+    el.style.left = el.dataset.left + "%";
+    el.style.width = el.dataset.width + "%";
+    const cb = el.querySelector(".spark-bar.completion");
+    const pb = el.querySelector(".spark-bar.prompt");
+    if (cb) cb.style.height = el.dataset.hc + "%";
+    if (pb) pb.style.height = el.dataset.hp + "%";
+  });
+  body.querySelectorAll(".spark-xlabel").forEach(el => {
+    el.style.left = el.dataset.left + "%";
+  });
 
   const plot = $("spark-plot"), hover = $("spark-hover");
   const show = ev => {

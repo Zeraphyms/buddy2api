@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from core import converter
 from .browser_login import BrowserLogin
@@ -497,15 +497,29 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
     async def redirect_admin():
         return RedirectResponse("/admin/", 302)
 
+    def _asset_version():
+        """给静态资源加内容指纹，避免浏览器沿用旧缓存。"""
+        stamp = 0
+        for name in ("app.js", "style.css"):
+            try:
+                stamp = max(stamp, int((ASSETS / name).stat().st_mtime))
+            except OSError:
+                pass
+        return str(stamp)
+
     @app.get("/admin/")
     async def index():
-        return FileResponse(ASSETS / "index.html")
+        html = (ASSETS / "index.html").read_text(encoding="utf-8")
+        v = _asset_version()
+        html = html.replace("/admin/assets/app.js", f"/admin/assets/app.js?v={v}")
+        html = html.replace("/admin/assets/style.css", f"/admin/assets/style.css?v={v}")
+        return HTMLResponse(html)
 
     @app.get("/admin/assets/{filename}")
     async def asset(filename: str):
         if filename not in {"app.js", "style.css"}:
             raise HTTPException(404)
-        return FileResponse(ASSETS / filename)
+        return FileResponse(ASSETS / filename, headers={"Cache-Control": "no-store"})
 
     @app.post("/admin/api/login")
     async def login(req: Request):
