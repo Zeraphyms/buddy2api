@@ -3,11 +3,18 @@
 只保留聚合计数：不存请求体、回复内容或密钥。数据随 state.json 持久化，
 结构为 {bucket: {tokens, prompt, completion, credit, requests, failed, duration_ms}}，
 bucket 形如 "account:<aid>" / "model:<region>:<model>" / "realm:<region>"。
+
+另有按本地日期（东八区）索引的 "usage_daily"，供「今日用量」使用；
+不用 usage_series 计算，因为 series 只保留最近 MAX_SERIES_POINTS 个点，
+跨不过一整天。
 """
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 MAX_SERIES_POINTS = 240
+MAX_DAILY_ENTRIES = 60
+CN = timezone(timedelta(hours=8))
 
 
 def _number(value, default=0):
@@ -30,6 +37,7 @@ class UsageStats:
             store.data.setdefault("usage_stats", {})
             store.data.setdefault("usage_series", [])
             store.data.setdefault("usage_totals", {})
+            store.data.setdefault("usage_daily", {})
 
     def record(self, aid, region, model, usage, failed=False, duration_ms=None):
         """记一次真实请求的用量。usage 为上游返回的 usage 字典。"""
@@ -96,6 +104,24 @@ class UsageStats:
             point["completion"] += completion
             point["tokens"] += tokens
             point["requests"] += 1
+
+            # 按本地日期（东八区）累计，供「今日用量」使用。
+            daily = self.store.data["usage_daily"]
+            day = datetime.fromtimestamp(self.clock(), CN).strftime("%Y-%m-%d")
+            entry = daily.setdefault(day, {
+                "prompt": 0, "completion": 0, "tokens": 0,
+                "requests": 0, "failed": 0, "credit": 0.0,
+            })
+            entry["prompt"] += prompt
+            entry["completion"] += completion
+            entry["tokens"] += tokens
+            entry["requests"] += 1
+            if failed:
+                entry["failed"] += 1
+            entry["credit"] = round(entry["credit"] + credit, 6)
+            if len(daily) > MAX_DAILY_ENTRIES:
+                for stale in sorted(daily)[:-MAX_DAILY_ENTRIES]:
+                    daily.pop(stale, None)
             self._dirty = True
             if self.clock() - self._last_persist >= self.persist_interval:
                 self.store.save()
@@ -114,6 +140,7 @@ class UsageStats:
             self.store.data["usage_stats"] = {}
             self.store.data["usage_series"] = []
             self.store.data["usage_totals"] = {}
+            self.store.data["usage_daily"] = {}
             self.store.save()
 
     @staticmethod
@@ -158,6 +185,7 @@ class UsageStats:
             buckets = {k: dict(v) for k, v in self.store.data["usage_stats"].items()}
             series = [dict(p) for p in self.store.data["usage_series"]]
             totals = dict(self.store.data["usage_totals"])
+            daily = {k: dict(v) for k, v in (self.store.data.get("usage_daily") or {}).items()}
             legacy_usage = {k: dict(v) for k, v in (self.store.data.get("model_usage") or {}).items()}
             legacy_accounts = {k: dict(v) for k, v in (self.store.data.get("account_status") or {}).items()}
         accounts, models, realms = [], [], []
@@ -207,6 +235,11 @@ class UsageStats:
         # 总量：实时累计 + 并入的历史（历史只有 tokens/credit，无 prompt 拆分）。
         legacy_tokens = sum(row.get("legacy_tokens", 0) for row in models)
         legacy_credit = sum(row.get("legacy_credit", 0.0) for row in models)
+        today = datetime.fromtimestamp(self.clock(), CN).strftime("%Y-%m-%d")
+        today_row = daily.get(today) or {
+            "prompt": 0, "completion": 0, "tokens": 0,
+            "requests": 0, "failed": 0, "credit": 0.0,
+        }
         return {
             "totals": {
                 "requests": totals.get("requests", 0),
@@ -219,6 +252,7 @@ class UsageStats:
                 if totals.get("timed") else None,
             },
             "legacy": {"tokens": legacy_tokens, "credit": legacy_credit},
+            "today": dict(today_row, date=today),
             "accounts": accounts,
             "models": models,
             "realms": realms,

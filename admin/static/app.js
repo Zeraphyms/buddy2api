@@ -679,7 +679,9 @@ function renderUsage() {
   const t = d.totals || {};
   const legacy = d.legacy || {};
   const accounts = d.accounts || [], models = d.models || [], realms = d.realms || [];
+  const today = d.today || {};
   const cards = [
+    ["\u4eca\u65e5 token", fmtTokens(today.tokens || 0)],
     ["\u8bf7\u6c42\u6570", fmtNum(t.requests || 0)],
     ["\u603b token", fmtTokens(t.tokens)],
     ["prompt", fmtTokens(t.prompt)],
