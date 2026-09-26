@@ -738,30 +738,87 @@ function renderUsage() {
 
 function renderUsageSeries(series) {
   const body = $("usage-chart-body");
-  if (!series.length) { body.innerHTML = '<p class="history-empty">\u6682\u65e0\u65f6\u5e8f\u6570\u636e</p>'; $("usage-window").textContent = ""; return; }
-  const W = 900, H = 160, PAD = 4;
+  const win = $("usage-window");
+  if (!series.length) {
+    body.innerHTML = '<p class="history-empty">\u6682\u65e0\u65f6\u5e8f\u6570\u636e</p>';
+    win.textContent = "";
+    return;
+  }
+  const hm = t => new Date(t * 1000).toLocaleTimeString("zh-CN",
+    { hour: "2-digit", minute: "2-digit", hour12: false });
+  const hmFull = t => {
+    const d = new Date(t * 1000);
+    return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " " + hm(t);
+  };
   const peak = Math.max(1, ...series.map(p => (p.prompt || 0) + (p.completion || 0)));
-  const step = series.length > 1 ? (W - PAD * 2) / (series.length - 1) : 0;
-  const y = v => H - PAD - (v / peak) * (H - PAD * 2);
-  let promptPts = [], compPts = [], areaPts = [];
-  series.forEach((p, i) => {
-    const x = PAD + step * i;
-    promptPts.push(x + "," + y(p.prompt || 0));
-    const total = (p.prompt || 0) + (p.completion || 0);
-    compPts.push(x + "," + y(total));
-    areaPts.push(x + "," + y(total));
-  });
-  const base = H - PAD;
-  const area = "M" + PAD + "," + base + " L" + areaPts.join(" L") + " L" + (PAD + step * (series.length - 1)) + "," + base + " Z";
+  // 纵轴上限向上取整到易读刻度
+  const niceMax = (() => {
+    const raw = peak * 1.1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const steps = [1, 2, 2.5, 5, 10];
+    for (const s of steps) if (raw <= s * mag) return s * mag;
+    return 10 * mag;
+  })();
+  const ticks = [niceMax, niceMax / 2, 0];
+
+  // 横轴：最多标 5 个时间点，避免拥挤
+  const n = series.length;
+  const labelIdx = n <= 5 ? series.map((_, i) => i)
+    : [0, Math.round((n - 1) / 3), Math.round((n - 1) * 2 / 3), n - 1];
+  const uniqIdx = [...new Set(labelIdx)];
+
+  const bars = series.map((p, i) => {
+    const prompt = p.prompt || 0, completion = p.completion || 0;
+    const total = prompt + completion;
+    const hp = (prompt / niceMax) * 100, hc = (completion / niceMax) * 100;
+    const tip = hmFull(p.t) + " · 合计 " + fmtTokens(total) +
+      "（prompt " + fmtTokens(prompt) + " / completion " + fmtTokens(completion) + "）· 请求 " + (p.requests || 0);
+    return '<div class="spark-col" data-tip="' + esc(tip) + '" tabindex="0" aria-label="' + esc(tip) + '">' +
+      '<span class="spark-bar completion" style="height:' + hc.toFixed(2) + '%"></span>' +
+      '<span class="spark-bar prompt" style="height:' + hp.toFixed(2) + '%"></span>' +
+      '</div>';
+  }).join("");
+
+  const yAxis = ticks.map(v =>
+    '<span class="spark-tick">' + esc(fmtTokens(v)) + "</span>").join("");
+
   body.innerHTML =
-    '<svg class="usage-svg" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-hidden="true">' +
-    '<path d="' + area + '" class="usage-area"></path>' +
-    '<polyline points="' + compPts.join(" ") + '" class="usage-line completion"></polyline>' +
-    '<polyline points="' + promptPts.join(" ") + '" class="usage-line prompt"></polyline>' +
-    "</svg>";
-  const first = new Date(series[0].t * 1000), last = new Date(series[series.length - 1].t * 1000);
-  const hm = d => d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  $("usage-window").textContent = hm(first) + " \u2013 " + hm(last) + " \u00b7 \u5cf0\u503c " + fmtTokens(peak) + "/min";
+    '<div class="spark-wrap">' +
+      '<div class="spark-axis-y" aria-hidden="true">' + yAxis + "</div>" +
+      '<div class="spark-plot" id="spark-plot">' +
+        '<div class="spark-grid" aria-hidden="true">' +
+          '<i></i><i></i><i></i>' +
+        "</div>" +
+        '<div class="spark-bars">' + bars + "</div>" +
+      "</div>" +
+    "</div>" +
+    '<div class="spark-axis-x">' +
+      uniqIdx.map(i =>
+        '<span class="spark-xlabel" style="left:' +
+        (n > 1 ? (i / (n - 1)) * 100 : 50).toFixed(2) + '%">' + esc(hm(series[i].t)) + "</span>").join("") +
+    "</div>" +
+    '<div class="spark-hover" id="spark-hover" hidden></div>';
+  win.innerHTML = esc(hmFull(series[0].t)) + " \u2013 " + esc(hmFull(series[n - 1].t)) +
+    ' \u00b7 \u5cf0\u503c ' + esc(fmtTokens(peak)) + '/min \u00b7 \u6bcf\u67f1 1 \u5206\u949f';
+
+  const plot = $("spark-plot"), hover = $("spark-hover");
+  const show = ev => {
+    const col = ev.target.closest(".spark-col");
+    if (!col) { hover.hidden = true; return; }
+    hover.textContent = col.dataset.tip;
+    hover.hidden = false;
+    const pr = plot.getBoundingClientRect(), hr = hover.getBoundingClientRect();
+    const cr = col.getBoundingClientRect();
+    let left = cr.left - pr.left + cr.width / 2 - hr.width / 2;
+    left = Math.max(0, Math.min(left, pr.width - hr.width));
+    hover.style.left = left + "px";
+    hover.style.top = Math.max(0, cr.top - pr.top - hr.height - 6) + "px";
+  };
+  plot.addEventListener("mousemove", show);
+  plot.addEventListener("mouseover", show);
+  plot.addEventListener("mouseleave", () => { hover.hidden = true; });
+  plot.addEventListener("focusin", show);
+  plot.addEventListener("focusout", () => { hover.hidden = true; });
 }
 
 (async () => { try { const s = await api("session"); csrf = s.csrf; await enter(); } catch (e) { if (!csrf) showLogin(); } })();

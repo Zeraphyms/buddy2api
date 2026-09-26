@@ -47,12 +47,30 @@
 .usage-card strong{display:block;font:26px/1.3 Consolas,monospace;color:#253e35;letter-spacing:-1px}
 .usage-card span{font-size:11px;color:#7d8a85}
 .usage-chart{margin-bottom:26px}
-.usage-chart-body{min-height:168px;display:flex;align-items:center;justify-content:center}
+.usage-chart-body{min-height:168px;display:flex;flex-direction:column;justify-content:center}
 .usage-svg{width:100%;height:160px;display:block}
 .usage-area{fill:#e8f0e2}
 .usage-line{fill:none;stroke-width:2}
 .usage-line.prompt{stroke:#6f9c56}
 .usage-line.completion{stroke:#3f6f78}
+.spark-wrap{display:flex;gap:10px;align-items:stretch}
+.spark-axis-y{display:flex;flex-direction:column;justify-content:space-between;width:58px;text-align:right;font:10px Consolas,monospace;color:#98a49e;padding:1px 0}
+.spark-tick{line-height:1}
+.spark-plot{position:relative;flex:1;height:158px;min-width:0}
+.spark-grid{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.spark-grid i{border-top:1px dashed #e8ece8;height:0;display:block}
+.spark-grid i:first-child{border-top:1px solid #dfe4df}
+.spark-bars{position:absolute;inset:0;display:flex;align-items:flex-end;gap:1px}
+.spark-col{position:relative;flex:1 1 0;min-width:1px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;cursor:default;border-radius:2px 2px 0 0}
+.spark-col:hover,.spark-col:focus-visible{background:#f0f4ee;outline:none}
+.spark-bar{display:block;width:100%}
+.spark-bar.prompt{background:#6f9c56}
+.spark-bar.completion{background:#3f6f78;border-radius:2px 2px 0 0}
+.spark-axis-x{position:relative;height:16px;margin:4px 0 0 68px}
+.spark-xlabel{position:absolute;top:0;transform:translateX(-50%);font:10px Consolas,monospace;color:#98a49e;white-space:nowrap}
+.spark-xlabel:first-child{transform:none}
+.spark-xlabel:last-child{transform:translateX(-100%)}
+.spark-hover{position:absolute;z-index:3;pointer-events:none;background:#1e2b34;color:#fff;font:11px/1.55 Consolas,monospace;padding:6px 9px;border-radius:6px;box-shadow:0 6px 18px #1e2b3426;white-space:nowrap}
 .usage-legend{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 5px 0 12px;vertical-align:middle}
 .usage-legend.prompt{background:#6f9c56}
 .usage-legend.completion{background:#3f6f78}
