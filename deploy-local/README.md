@@ -18,14 +18,13 @@
 |------|-----|
 | Python | 3.12.10（虚拟环境 `.venv`） |
 | 依赖 | fastapi / uvicorn / httpx（已安装） |
-| 单元测试 | 99 passed |
+| 单元测试 | 103 passed（`python -m pytest tests -q`） |
 | 运行模式 | **管理后台 + API（单进程）** |
 | 服务地址 | `http://127.0.0.1:8787` |
 | 管理界面 | `http://127.0.0.1:8787/admin/` |
-| 登录态目录 | `deploy-local\auth` |
-| 管理数据 | `deploy-local\management` |
-| 已导入账号 | `13557879180`（.cn，约 4927 积分）、`国际版 zeraphyms`（.ai，约 348 积分） |
-| 管理密钥 / 客户端 Key | 见 `deploy-local\.env` |
+| 登录态目录 | `deploy-local\auth`（首次启动自动创建） |
+| 管理数据 | `deploy-local\management`（首次启动自动创建） |
+| 本地配置 | `deploy-local\.env`（缺失时启动脚本自动生成；模板见 `.env.example`） |
 | 源码补丁 | `deploy-local\intl-support.patch`（国际版支持 + 模型倍率） |
 
 已验证可用：`/health`、`/v1/models`、`/v1/chat/completions`（含流式）、
@@ -77,9 +76,62 @@ powershell -ExecutionPolicy Bypass -File D:\item\codebuddy2api\deploy-local\chec
 `start.bat` / `start-admin.ps1` 都会先检查端口占用；被占用时打印占用进程 PID
 并给出处理办法，不会静默失败。
 
+
+## 三、配置文件 `.env`（首次部署必看）
+
+管理后台模式需要一个 `deploy-local\.env`，里面放三样东西：管理密钥、客户端
+Key、监听端口。
+
+**全新克隆时这个文件不存在**（它被 `.gitignore` 排除，不会进仓库），所以有两条路：
+
+**方式 A：什么都不做——脚本会自动生成**
+
+直接运行 `start-admin.bat`。脚本发现没有 `.env` 会自己生成一份随机配置，并把
+两把密钥打印在控制台：
+
+```text
+[workbuddy2api] 首次启动：已自动生成配置文件
+  D:\...\deploy-local\.env
+
+  管理密钥 ADMIN_KEY             : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  客户端 Key CODEBUDDY2OPENAI_KEY: sk-wb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+> 客户端 Key 只在首次生成时完整显示，请立刻保存。想换端口或密钥，编辑该
+> `.env` 后重启即可；**已存在的 `.env` 永远不会被覆盖。**
+
+**方式 B：自己指定配置**
+
+```powershell
+Copy-Item deploy-local\.env.example deploy-local\.env
+# 编辑 deploy-local\.env 后重新启动
+```
+
+模板里每一项都有注释和生成命令，照着填就行。
+
+| 变量 | 作用 | 必填 |
+|------|------|------|
+| `ADMIN_KEY` | 登录管理后台的密钥，**至少 20 字符**，否则服务拒绝启动 | 是 |
+| `CODEBUDDY2OPENAI_KEY` | 填进客户端的 API Key，建议 `sk-wb-` 开头 | 是 |
+| `PORT` | 监听端口，默认 `8787` | 否 |
+
+> **路径别放错**：`.env` 必须在 `deploy-local\` 里（和启动脚本同级），放仓库根
+> 目录无效。报错 `找不到配置文件 ...\deploy-local\.env` 就是在说这件事。
+
+> **改 Key 的时机**：`.env` 里的客户端 Key 只在**第一次启动**时写入数据文件。如果
+> `deploy-local\management\state.json` 已经存在，之后改 `.env` 不会生效——后台也看不到
+> 旧的完整 Key。这种情况请用 `set-key.ps1` 或在管理后台新建 Key（详见「排障」一节）。
+>
+> `ADMIN_KEY`（管理后台登录密钥）不同，**每次启动都读 `.env`**，可以随时改。
+
+> 另外这条报错还有一种成因：`.venv` 不存在或名字被改过。启动脚本会调用
+> `.venv\Scripts\python.exe`，缺失时的报错形如
+> `无法加载模块“.venv”`。先确认项目根目录下有 `.venv`（见 README 的安装依赖一节）。
+
 ---
 
-## 三、登录管理后台
+## 四、登录管理后台
+
 
 1. 用 `start-admin.bat` 启动（启动日志里会打印管理密钥和管理界面地址）。
 2. 浏览器打开 <http://127.0.0.1:8787/admin/>。
@@ -107,7 +159,7 @@ powershell -ExecutionPolicy Bypass -File D:\item\codebuddy2api\deploy-local\chec
 
 ---
 
-## 四、国际版支持（已打补丁）
+## 五、国际版支持（已打补丁）
 
 原项目**只支持国内账号**，把后端网关写死为 `copilot.tencent.com`，国际版
 （`workbuddy.ai` / `codebuddy.ai`）凭据打过去一律 401。
@@ -168,7 +220,7 @@ git apply deploy-local\intl-support.patch
 
 ---
 
-## 五、模型列表按账号返回（重要）
+## 六、模型列表按账号返回（重要）
 
 `/v1/models` 和后台「连接测试」的下拉，返回**当前账号实际能用的模型**：
 
@@ -242,7 +294,7 @@ git apply deploy-local\intl-support.patch
 
 ---
 
-## 六、模型与倍率（新增功能）
+## 七、模型与倍率（新增功能）
 
 管理后台「模型与倍率」页展示每个模型的计费倍率。数据来自**上游真实接口**：
 
@@ -294,7 +346,7 @@ GET {网关}/v2/enterprises/personal/models
 
 ---
 
-## 七、登录态目录说明
+## 八、登录态目录说明
 
 本机 `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\` 下有**两个**账号文件：
 
@@ -313,7 +365,7 @@ GET {网关}/v2/enterprises/personal/models
 
 ---
 
-## 八、客户端接入
+## 九、客户端接入
 
 ### API Key 在哪？
 
@@ -411,7 +463,7 @@ codex --profile workbuddy "你的任务"
 
 ---
 
-## 九、自检命令
+## 十、自检命令
 
 ```powershell
 # 健康检查
@@ -431,7 +483,7 @@ curl.exe http://127.0.0.1:8787/v1/chat/completions ^
 
 ---
 
-## 十、可用模型
+## 十一、可用模型
 
 模型列表**动态来自上游**，随账号区域变化，以 `/v1/models` 或后台
 「模型与倍率」页显示为准。下面是各区域的实测快照（2026-09）：
@@ -461,7 +513,7 @@ curl.exe http://127.0.0.1:8787/v1/chat/completions ^
 
 ---
 
-## 十一、排障
+## 十二、排障
 
 | 现象 | 原因与处理 |
 |------|-----------|
@@ -492,7 +544,7 @@ curl.exe http://127.0.0.1:8787/v1/chat/completions ^
 
 ---
 
-## 十二、文件说明
+## 十三、文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -508,7 +560,7 @@ curl.exe http://127.0.0.1:8787/v1/chat/completions ^
 
 ---
 
-## 十三、免责声明
+## 十四、免责声明
 
 本项目仅用于个人学习与研究，与腾讯、WorkBuddy、CodeBuddy、OpenAI、Anthropic
 无官方关联。请仅在你合法拥有订阅的前提下使用。

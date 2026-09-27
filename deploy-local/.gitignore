@@ -3,3 +3,6 @@ auth/
 management/
 .env
 *.log
+
+# 配置模板需要入库，覆盖根目录的 .env.* 忽略规则
+!.env.example

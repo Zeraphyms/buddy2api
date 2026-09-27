@@ -121,13 +121,24 @@ deploy-local\start-admin.bat
 这种模式包含**全部功能**：账号池轮转、浏览器授权添加账号、积分任务、
 任务中心、用量统计、模型与倍率。管理界面在 `http://127.0.0.1:8787/admin/`。
 
-首次启动前需要设置管理密钥（至少 20 位）与客户端 Key，可写入 `.env`：
+首次启动**不需要手动配置**：如果 `deploy-local\` 下没有 `.env`，启动脚本会自动
+生成一份随机配置，并把管理密钥和客户端 Key 打印在控制台（客户端 Key 之后不再
+完整显示，请及时保存）。想自己指定端口或密钥，把配置模板复制一份即可：
+
+```powershell
+Copy-Item deploy-local\.env.example deploy-local\.env
+# 然后编辑 deploy-local\.env，填写下面三项后重新启动
+```
 
 ```ini
 ADMIN_KEY=<至少 20 位的随机串>
 CODEBUDDY2OPENAI_KEY=sk-wb-<随机串>
 PORT=8787
 ```
+
+> `.env` 必须放在 `deploy-local\` 目录下（与启动脚本同级），不是仓库根目录。
+> 它已被 `.gitignore` 排除，不会上传到仓库。
+
 
 #### 模式 B：纯转换器（无管理后台）
 
@@ -563,10 +574,6 @@ python3 -m pytest tests/
 ```
 
 ---
-
-## 致谢
-
-本项目基于 [HanHan666666/codebuddy2openai](https://github.com/HanHan666666/codebuddy2openai) 的思路演进而来，感谢原作者的开源贡献。
 
 ## 免责声明
 
