@@ -518,6 +518,8 @@ curl.exe http://127.0.0.1:8787/v1/chat/completions ^
 | 现象 | 原因与处理 |
 |------|-----------|
 | **`/admin/` 返回 404** | 用的是独立转换器模式。管理后台需用 `start-admin.bat` 启动 |
+| **报 `无法加载模块“.venv”`** | 项目根目录缺少 `.venv`，或名字/位置不对。启动脚本会自动创建；若自动创建失败，手动执行 `python -m venv .venv` 与 `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` |
+| **报一堆「不是内部或外部命令」碎片（如 `ell`、`RLEVEL`）** | `.bat` 行尾变成了 LF（多见于下载 ZIP 后）。仓库已加 `.gitattributes` 固定为 CRLF，重新下载即可；旧的解压包需重新获取 |
 | **登录后仍跳回登录页** | 浏览器需能保存 Cookie。`127.0.0.1` 属安全上下文，正常可用；若用局域网 IP 访问则需 HTTPS 反代 |
 | **`/v1/*` 返回 401 `invalid api key`** | 管理后台模式强制校验客户端 Key，请带上「接入指南」页显示的 Key |
 | **看不到完整 Key / 复制不了** | 上游设计只存 SHA-256，仅创建时显示一次。本部署可用 `.env` 的 `ADMIN_REVEAL_INITIAL_KEY=1` 显示初始 Key；后台新建的 Key 仍无法查看，需要时重新建一个 |

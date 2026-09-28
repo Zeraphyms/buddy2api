@@ -82,25 +82,41 @@
 
 ### 2. 安装依赖
 
-推荐用 `uv`：
+> **Windows 用户可以先跳过这一步**：`deploy-local` 的启动脚本发现项目内没有
+> `.venv` 时，会自动创建虚拟环境并安装依赖，首次启动会慢一些。想手动控制就
+> 按下面任一方式安装。
+
+**Windows（PowerShell）**：
+
+```powershell
+git clone https://github.com/Zeraphyms/buddy2api.git buddy2api
+cd buddy2api
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+如果要下载 ZIP 而不是 clone：解压后先进到解压出来的目录（通常是
+`buddy2api-main`），再执行上面第 3、4 行。
+
+**macOS / Linux，或使用 uv**：
 
 ```bash
 git clone https://github.com/Zeraphyms/buddy2api.git buddy2api
 cd buddy2api
 
+# 方式一：uv
 uv venv
 uv pip install -r requirements.txt
-```
 
-也可以用虚拟环境：
-
-```bash
+# 方式二：标准 venv
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> 注意：两种启动模式都需要先装依赖。`deploy-local` 脚本会自动使用项目内的 `.venv`。
+> **环境位置很重要**：虚拟环境必须建在**项目根目录**、且目录名正好是 `.venv`
+> （`deploy-local` 与 `admin`/`core` 同级）。装在别处或改名，启动脚本找不到它。
+> 常见报错 `无法加载模块“.venv”` 就是环境缺失或位置不对。
 
 ### 3. 启动
 

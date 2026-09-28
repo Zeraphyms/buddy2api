@@ -82,6 +82,58 @@ if (-not $env:ADMIN_KEY -or $env:ADMIN_KEY.Length -lt 20) {
     exit 1
 }
 
+# ---------- 运行环境检查（.venv 缺失时自动创建并安装依赖） ----------
+# 启动脚本固定调用 .venv\Scripts\python.exe。全新克隆/解压 ZIP 时项目内没有
+# 这个环境，用户如果只在全局装了依赖，这里会失败，所以自动补齐。
+$venvPy = Join-Path $repo ".venv\Scripts\python.exe"
+if (-not (Test-Path $venvPy)) {
+    Write-Host "[workbuddy2api] 未找到项目虚拟环境 .venv，正在自动创建…" -ForegroundColor Cyan
+
+    # 找一个可用的 Python 解释器：优先 py -3，其次 python
+    $bootstrap = $null
+    foreach ($cand in @(@("py", "-3"), @("python"), @("python3"))) {
+        $exe = $cand[0]
+        $pre = @()
+        if ($cand.Count -gt 1) { $pre = @($cand[1]) }
+        $probe = Get-Command $exe -ErrorAction SilentlyContinue
+        if ($probe) { $bootstrap = @{ Exe = $probe.Source; Pre = $pre }; break }
+    }
+    if (-not $bootstrap) {
+        Write-Host "[workbuddy2api] 没有找到 Python。请先安装 Python 3.10 或以上版本，" -ForegroundColor Red
+        Write-Host "[workbuddy2api] 安装时务必勾选 Add Python to PATH，然后重新运行本脚本。" -ForegroundColor Red
+        Write-Host "[workbuddy2api] 下载地址: https://www.python.org/downloads/windows/" -ForegroundColor Red
+        exit 1
+    }
+
+    $pyArgs = @($bootstrap.Pre) + @("-m", "venv", (Join-Path $repo ".venv"))
+    & $bootstrap.Exe @pyArgs
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPy)) {
+        Write-Host "[workbuddy2api] 创建虚拟环境失败。可在项目根目录手动执行：" -ForegroundColor Red
+        Write-Host "    python -m venv .venv" -ForegroundColor Yellow
+        exit 1
+    }
+
+    Write-Host "[workbuddy2api] 正在安装依赖（首次较慢，请稍候）…" -ForegroundColor Cyan
+    & $venvPy -m pip install --upgrade pip --quiet
+    & $venvPy -m pip install -r (Join-Path $repo "requirements.txt")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[workbuddy2api] 依赖安装失败。可在项目根目录手动执行：" -ForegroundColor Red
+        Write-Host "    .\.venv\Scripts\python.exe -m pip install -r requirements.txt" -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "[workbuddy2api] 环境准备完成。" -ForegroundColor Green
+    Write-Host ""
+}
+
+# 依赖是否齐全：缺了就给出手动命令（避免直接抛出难懂的 ImportError）
+& $venvPy -c "import fastapi, uvicorn, httpx" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[workbuddy2api] 依赖不完整（fastapi / uvicorn / httpx）。" -ForegroundColor Red
+    Write-Host "请在项目根目录执行后重试：" -ForegroundColor Yellow
+    Write-Host "    .\.venv\Scripts\python.exe -m pip install -r requirements.txt" -ForegroundColor Yellow
+    exit 1
+}
+
 # ---------- 端口占用检查 ----------
 function Get-ListenerPids {
     param([int]$P)
