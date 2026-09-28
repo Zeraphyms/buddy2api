@@ -851,4 +851,34 @@ function renderUsageSeries(series) {
   plot.addEventListener("focusout", () => { hover.hidden = true; });
 }
 
-(async () => { try { const s = await api("session"); csrf = s.csrf; await enter(); } catch (e) { if (!csrf) showLogin(); } })();
+// 启动兜底：正常情况下下面这段会在几百毫秒内切到登录页或工作区。
+// 若静态脚本被拦截、接口卡住等异常导致一直停在 boot 页面，用户只会看到
+// 一行「正在连接工作空间…」而不知道发生了什么，所以超时后给出可操作提示。
+function bootFailed(detail) {
+  const boot = $("boot");
+  if (!boot || boot.hidden) return;
+  const note = document.createElement("p");
+  note.className = "muted";
+  note.style.maxWidth = "420px";
+  note.style.textAlign = "center";
+  note.textContent = "连接管理后台失败" + (detail ? "：" + detail : "。") + " 请确认服务仍在运行，然后按 Ctrl + F5 刷新重试。";
+  boot.appendChild(note);
+  const retry = document.createElement("button");
+  retry.className = "secondary";
+  retry.textContent = "重新加载";
+  retry.style.marginTop = "6px";
+  retry.addEventListener("click", () => location.reload());
+  boot.appendChild(retry);
+}
+const bootTimer = setTimeout(() => bootFailed("等待响应超时"), 8000);
+(async () => {
+  try {
+    const s = await api("session");
+    csrf = s.csrf;
+    await enter();
+  } catch (e) {
+    if (!csrf) showLogin();
+  } finally {
+    clearTimeout(bootTimer);
+  }
+})();

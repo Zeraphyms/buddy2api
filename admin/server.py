@@ -28,9 +28,32 @@ COOKIE = "workbuddy_admin"
 MAX_BODY = 1024 * 1024
 ASSETS = Path(__file__).parent / "static"
 
+# 静态资源的 MIME 类型显式声明：不要依赖 mimetypes.guess_type，它在 Windows 上
+# 会读注册表，而注册表可能把 .js 关联成 text/plain（被编辑器或旧工具改过），
+# 导致浏览器按严格 MIME 检查拒绝执行 app.js，管理后台永远停在加载页。
+ASSET_TYPES = {
+    "app.js": "application/javascript; charset=utf-8",
+    "style.css": "text/css; charset=utf-8",
+}
+
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def is_https(req, fallback=False):
+    """判断当前请求是否走 HTTPS，用来决定 session cookie 是否带 Secure 标记。
+
+    纯 HTTP 的本地部署（http://127.0.0.1:8787）必须不带 Secure，否则浏览器
+    会直接丢弃 cookie，登录永远失败。若服务在 HTTPS 反向代理后面，代理通常
+    会设置 X-Forwarded-Proto，此时仍应带 Secure。拿不到信息时用 fallback。
+    """
+    proto = req.headers.get("x-forwarded-proto")
+    if proto:
+        return proto.split(",")[0].strip().lower() == "https"
+    if req.url.scheme:
+        return req.url.scheme == "https"
+    return fallback
 
 
 def write_json(path, value):
@@ -519,7 +542,11 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
     async def asset(filename: str):
         if filename not in {"app.js", "style.css"}:
             raise HTTPException(404)
-        return FileResponse(ASSETS / filename, headers={"Cache-Control": "no-store"})
+        return FileResponse(
+            ASSETS / filename,
+            media_type=ASSET_TYPES[filename],
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/admin/api/login")
     async def login(req: Request):
@@ -543,7 +570,15 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
                 store.sessions.pop(next(iter(store.sessions)))
             store.sessions[digest(sid)] = {"csrf": csrf, "expires": now + 12 * 3600}
         response = JSONResponse({"csrf": csrf})
-        response.set_cookie(COOKIE, sid, secure=secure_cookie, httponly=True, samesite="strict", path="/admin", max_age=12 * 3600)
+        response.set_cookie(
+            COOKIE,
+            sid,
+            secure=is_https(req, secure_cookie),
+            httponly=True,
+            samesite="strict",
+            path="/admin",
+            max_age=12 * 3600,
+        )
         return response
 
     @app.get("/admin/api/session")
@@ -557,7 +592,13 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
         with store.lock:
             store.sessions.pop(digest(req.cookies.get(COOKIE, "")), None)
         response = JSONResponse({"ok": True})
-        response.delete_cookie(COOKIE, path="/admin", secure=secure_cookie, httponly=True, samesite="strict")
+        response.delete_cookie(
+            COOKIE,
+            path="/admin",
+            secure=is_https(req, secure_cookie),
+            httponly=True,
+            samesite="strict",
+        )
         return response
 
     @app.get("/admin/api/accounts/models")

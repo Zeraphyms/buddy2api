@@ -4,7 +4,7 @@
 # 用法:  powershell -ExecutionPolicy Bypass -File start-admin.ps1
 #        powershell -ExecutionPolicy Bypass -File start-admin.ps1 -Port 9000
 #        powershell -ExecutionPolicy Bypass -File start-admin.ps1 -Force
-#        powershell -ExecutionPolicy Bypass -File start-admin.ps1 -InsecureCookie   # 纯 HTTP 下无法登录时使用
+#        powershell -ExecutionPolicy Bypass -File start-admin.ps1 -InsecureCookie   # 强制关掉 cookie 的 Secure（一般不需要）
 
 param(
     [int]$Port = 0,
@@ -171,12 +171,13 @@ Write-Host "[workbuddy2api] 管理界面 : http://127.0.0.1:$Port/admin/"
 Write-Host "[workbuddy2api] 管理密钥 : $env:ADMIN_KEY"
 Write-Host "[workbuddy2api] API Key  : $env:CODEBUDDY2OPENAI_KEY"
 if ($InsecureCookie) {
-    Write-Host "[workbuddy2api] Cookie   : 已关闭 Secure 标记（仅纯 HTTP 本地调试）" -ForegroundColor Yellow
+    Write-Host "[workbuddy2api] Cookie   : 强制关闭 Secure 标记（覆盖自动判断）" -ForegroundColor Yellow
 }
 Write-Host ""
 
-# 后台默认 secure_cookie=True（面向 HTTPS 反代）。纯 HTTP 访问时若浏览器
-# 拒绝保存 Secure Cookie，可用 -InsecureCookie 关闭该标记。
+# session cookie 的 Secure 标记现在按实际请求协议自动决定：纯 HTTP 访问不带
+# Secure（否则浏览器会丢弃 cookie 导致登录失败），HTTPS 或带 X-Forwarded-Proto:
+# https 的反代访问则自动带上。一般无需手动干预，保留 -InsecureCookie 作为兜底。
 if ($InsecureCookie) {
     $code = @"
 import os, uvicorn
