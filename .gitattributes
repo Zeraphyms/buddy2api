@@ -1,0 +1,14 @@
+# 行尾统一策略。
+#
+# 背景：GitHub 的「Code → Download ZIP」按默认策略输出 LF 行尾，而 git clone
+# 会受用户机器的 core.autocrlf 影响。Windows 的 .bat/.ps1 必须用 CRLF，否则
+# cmd.exe 会错位解析，报出「不是内部或外部命令」等一堆碎片化错误。
+# 下面几条确保：无论 clone 还是下载 ZIP，Windows 脚本一律是 CRLF。
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+
+# Shell 脚本必须用 LF，否则在 Linux/macOS 上会报 $'\r': command not found
+*.sh text eol=lf
