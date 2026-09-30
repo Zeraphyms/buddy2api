@@ -21,6 +21,7 @@ Codex CLI 会把大量运行时提示、完整工具 schema、长历史、以及
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 
@@ -70,15 +71,15 @@ BASE_SYSTEM_PROMPT = (
 
 HISTORY_PREFIX = "Earlier conversation summary (condensed):"
 
-MAX_SYSTEM_GUIDANCE_CHARS = 1200
-MAX_USER_CHARS = 3200
-MAX_ASSISTANT_CHARS = 1800
-MAX_TOOL_OUTPUT_CHARS = 1600
-MAX_TOOL_ARGS_CHARS = 900
-MAX_HISTORY_SUMMARY_CHARS = 2200
-MAX_HISTORY_ITEMS = 10
-MAX_TAIL_MESSAGES = 8
-MAX_TAIL_CHARS = 7000
+MAX_SYSTEM_GUIDANCE_CHARS = int(os.environ.get("WB2A_MAX_SYSTEM_GUIDANCE_CHARS", "1200"))
+MAX_USER_CHARS = int(os.environ.get("WB2A_MAX_USER_CHARS", "3200"))
+MAX_ASSISTANT_CHARS = int(os.environ.get("WB2A_MAX_ASSISTANT_CHARS", "1800"))
+MAX_TOOL_OUTPUT_CHARS = int(os.environ.get("WB2A_MAX_TOOL_OUTPUT_CHARS", "1600"))
+MAX_TOOL_ARGS_CHARS = int(os.environ.get("WB2A_MAX_TOOL_ARGS_CHARS", "900"))
+MAX_HISTORY_SUMMARY_CHARS = int(os.environ.get("WB2A_MAX_HISTORY_SUMMARY_CHARS", "2200"))
+MAX_HISTORY_ITEMS = int(os.environ.get("WB2A_MAX_HISTORY_ITEMS", "10"))
+MAX_TAIL_MESSAGES = int(os.environ.get("WB2A_MAX_TAIL_MESSAGES", "8"))
+MAX_TAIL_CHARS = int(os.environ.get("WB2A_MAX_TAIL_CHARS", "7000"))
 
 SCHEMA_KEEP_KEYS = {
     "type",

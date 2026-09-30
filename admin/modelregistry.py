@@ -6,6 +6,9 @@
 本表只保留一个用途：作为「探测候选池」的补充。上游目录偶尔不登记
 部分实际可用的模型（如国际版 gpt-6-astra），仅靠目录会永远探测不到，
 故在此登记名字供探测。表内参数（含 credit）仅供参考，不用于面板展示。
+
+国际版清单已按实测确认结果收敛为 29 个（2026-10-01，由国际账号真实
+探测得出）；国内版维持原 18 个，未做调整。
 """
 
 # region -> {model_id: {参数}}
@@ -247,18 +250,18 @@ MODELS = {
         },
     },
     "intl": {
-        "auto-chat": {
+        "auto": {
             "name": "Auto",
-            "credit": 0.57,
-            "default_effort": "",
+            "credit": None,
+            "default_effort": "high",
             "supported_efforts": [],
             "can_disable_thinking": False,
-            "supports_reasoning": False,
-            "context_length": 168000,
+            "supports_reasoning": True,
+            "context_length": 256000,
             "max_output_tokens": 32000,
-            "supports_images": False,
+            "supports_images": True,
             "supports_tool_call": True,
-            "description": "智能自动选择模型，适应不同任务需求",
+            "description": "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
         },
         "balanced-model": {
             "name": "Balanced",
@@ -272,19 +275,6 @@ MODELS = {
             "supports_images": True,
             "supports_tool_call": True,
             "description": "速度与质量兼 顾，日常工作首选",
-        },
-        "deep-model": {
-            "name": "Deep",
-            "credit": 3.33,
-            "default_effort": "",
-            "supported_efforts": [],
-            "can_disable_thinking": False,
-            "supports_reasoning": False,
-            "context_length": 176000,
-            "max_output_tokens": 24000,
-            "supports_images": True,
-            "supports_tool_call": True,
-            "description": "深度推理，适合深度分析与难题",
         },
         "deepseek-v4.1-flash": {
             "name": "Deepseek-V4.1-Flash",
@@ -364,6 +354,19 @@ MODELS = {
             "supports_tool_call": True,
             "description": "能力均衡，适合日常使用",
         },
+        "glm-5.1": {
+            "name": "GLM-5.1",
+            "credit": 0.79,
+            "default_effort": "medium",
+            "supported_efforts": ["medium"],
+            "can_disable_thinking": False,
+            "supports_reasoning": True,
+            "context_length": 200000,
+            "max_output_tokens": 48000,
+            "supports_images": True,
+            "supports_tool_call": True,
+            "description": "能力均衡，适合日常使用",
+        },
         "glm-5.2": {
             "name": "GLM-5.2",
             "credit": 0.79,
@@ -402,6 +405,19 @@ MODELS = {
             "supports_images": True,
             "supports_tool_call": True,
             "description": "原生多模态模型，擅长视觉理解与专业任务",
+        },
+        "glm-5v-turbo": {
+            "name": "GLM-5v-Turbo",
+            "credit": 0.71,
+            "default_effort": "medium",
+            "supported_efforts": ["medium"],
+            "can_disable_thinking": False,
+            "supports_reasoning": True,
+            "context_length": 200000,
+            "max_output_tokens": 131072,
+            "supports_images": True,
+            "supports_tool_call": True,
+            "description": "原生多模态模型",
         },
         "gpt-5.3-codex": {
             "name": "GPT-5.3-Codex",
@@ -533,6 +549,19 @@ MODELS = {
             "supports_tool_call": None,
             "description": "",
         },
+        "hy4-preview-x": {
+            "name": "hy4-preview-x",
+            "credit": 0.29,
+            "default_effort": "high",
+            "supported_efforts": ["high"],
+            "can_disable_thinking": False,
+            "supports_reasoning": True,
+            "context_length": 1000000,
+            "max_output_tokens": 64000,
+            "supports_images": True,
+            "supports_tool_call": True,
+            "description": "混元思考模型，具有增强的推理能力",
+        },
         "kimi-k2.6": {
             "name": "Kimi-K2.6",
             "credit": 0.52,
@@ -572,18 +601,18 @@ MODELS = {
             "supports_tool_call": True,
             "description": "擅长处理复杂的长程自主任务，前端开发能力突出，同时在知识工作与科研推理上表现出色。",
         },
-        "o4-mini": {
-            "name": "GPT-4o-Mini",
-            "credit": None,
-            "default_effort": "",
-            "supported_efforts": [],
+        "minimax-m3": {
+            "name": "MiniMax-M3",
+            "credit": 0.25,
+            "default_effort": "medium",
+            "supported_efforts": ["medium"],
             "can_disable_thinking": False,
-            "supports_reasoning": False,
-            "context_length": 104000,
-            "max_output_tokens": 24000,
+            "supports_reasoning": True,
+            "context_length": 512000,
+            "max_output_tokens": 524288,
             "supports_images": True,
             "supports_tool_call": True,
-            "description": "更小、更快的 GPT 模型，适用于日常编码和通用任务",
+            "description": "原生多模态，擅长代码、智能体任务",
         },
         "primary-model": {
             "name": "Primary",

@@ -251,17 +251,6 @@ class ModelRates:
         return [m.get("id") for m in (entry.get("models") or [])
                 if isinstance(m, dict) and m.get("id")]
 
-    def catalog_ids(self, regions=("cn", "intl")):
-        """两区目录的并集（仅作候选池，不代表某账号可用）。"""
-        ids = []
-        with self.lock:
-            catalogs = {k: list(v.get("models") or []) for k, v in self.catalogs.items()}
-        for region in regions:
-            for m in catalogs.get(region, []):
-                mid = m.get("id") if isinstance(m, dict) else None
-                if mid and mid not in ids:
-                    ids.append(mid)
-        return ids
 
     # ---------------- 按账号的可用性 ----------------
 
@@ -303,16 +292,20 @@ class ModelRates:
     def models_for_account(self, aid, region):
         """某账号实际可用的模型。
 
-        基线 = 该账号所在区域的上游目录；再叠加实测可用的模型
-        （国际账号的 gpt-6-astra 就不在其目录里），
-        并剔除实测返回 11102 的模型。
+        基线 = 该账号所在区域的**登记清单**（modelregistry 的权威表），
+        再叠加实测确认可用的模型，并剔除实测返回 11102 的模型。
+
+        注意这里刻意不用上游目录当基线：上游目录会把大量不在客户端里、
+        实际不可用的模型也列出来（国际版曾一次性多出十几个），既让面板
+        显示失真，也让「待探测」永远清不空。以上游目录为准的判断改为
+        只在探测时确认，不在展示时臆断。
         """
         ok, no = self.learned(aid)
         result = []
-        for mid in self.model_ids(region):
+        for mid in modelregistry.model_ids(region):
             if mid not in no and mid not in result:
                 result.append(mid)
-        # 实测可用的模型（可能在目录外，如 gpt-6-astra）
+        # 实测可用的模型（可能在登记清单外，如国际版 gpt-6-astra）
         for mid in ok:
             if mid not in no and mid not in result:
                 result.append(mid)
@@ -330,20 +323,17 @@ class ModelRates:
     def probe_candidates(self, aid, region, limit=None):
         """待探测的候选模型：候选池 − 已确认可用 − 已确认不可用。
 
-        候选池来自三处并集：本区域上游目录、两区目录并集、权威表。
-        只靠上游目录会漏掉未登记但可调用的模型（如国际版 gpt-6-astra），
-        故权威表优先排在前面，避免按 limit 分片探测时长期轮不到它们。
+        候选池只取登记清单（modelregistry 的权威表）里属于本区域、
+        以及本区域上游目录登记过的模型名。
+
+        不再把整个上游目录当候选：那会把上百个与该区域无关、客户端里
+        根本没有的模型也算进来，导致「待探测」永远清不空、白白烧额度。
+        候选池收敛后，探测几次即可清空。
         """
         ok, no = self.learned(aid)
         known = set(ok) | set(no)
         candidates = []
         for mid in modelregistry.model_ids(region):
-            if mid not in known and mid not in candidates:
-                candidates.append(mid)
-        for mid in self.model_ids(region):
-            if mid not in known and mid not in candidates:
-                candidates.append(mid)
-        for mid in self.catalog_ids():
             if mid not in known and mid not in candidates:
                 candidates.append(mid)
         return candidates[:limit] if limit else candidates
