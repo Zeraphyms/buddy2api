@@ -238,8 +238,8 @@ git apply deploy-local\intl-support.patch
 
 | 账号 | 模型数 | deepseek |
 |------|-------|----------|
-| 国内 `13557879180` | 30 | ✅ 4 个 |
-| 国际 `zeraphyms` | 21 | ✅ 1 个（`deepseek-v4.1-flash`） |
+| 国内 账号A | 30 | ✅ 4 个 |
+| 国际 账号B | 21 | ✅ 1 个（`deepseek-v4.1-flash`） |
 
 ### 每个账号的模型怎么算
 
@@ -352,8 +352,8 @@ GET {网关}/v2/enterprises/personal/models
 
 | 文件 | 账号 | 域名 | 打补丁后 |
 |------|------|------|----------|
-| `workbuddy-desktop-ai.info` | zeraphyms | www.workbuddy.ai | **可用**（走 .ai 网关） |
-| `workbuddy-desktop.info` | 13557879180 | www.workbuddy.cn | 可用（走 .cn 网关） |
+| `workbuddy-desktop-ai.info` | 账号B | www.workbuddy.ai | **可用**（走 .ai 网关） |
+| `workbuddy-desktop.info` | 账号A | www.workbuddy.cn | 可用（走 .cn 网关） |
 
 > 打补丁**前**，程序按文件名排序取第一个 `.info`（即 `-ai.info`），导致 401；
 > 因此当时用 `auth\` 子目录只放国内账号。打补丁**后**两个账号都可用，

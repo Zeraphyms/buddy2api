@@ -557,6 +557,9 @@ class PoolMiddleware:
                 body = json.loads(raw) if raw else {}
             except ValueError:
                 body = {}
+            # 对外白名单：在选账号之前判断，避免"模型未开放"被 503 掩盖
+            if isinstance(body, dict):
+                converter._check_model(body.get("model", "auto"))
             affinity_key = request_affinity(headers, body)
             original_receive = receive
             delivered = False

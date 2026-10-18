@@ -9,7 +9,8 @@
 param(
     [int]$Port = 0,
     [switch]$Force,
-    [switch]$InsecureCookie
+    [switch]$InsecureCookie,
+    [switch]$Public   # 对外模式：配合 cloudflared 隧道，后台仅本机可达
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +45,11 @@ if (-not (Test-Path $envFile)) {
         "# 改完后重启服务生效；客户端 Key 只在首次生成时显示一次，请及时保存。",
         "ADMIN_KEY=$adminKey",
         "CODEBUDDY2OPENAI_KEY=$clientKey",
-        "PORT=8787"
+        "PORT=8787",
+        "# 每个客户端 Key 每天最多对话请求次数，0 表示不限制",
+        "DAILY_REQUEST_LIMIT=1000",
+        "# 对外只开放这些模型（逗号分隔），留空则不限制",
+        "PUBLIC_MODELS="
     )
     [System.IO.File]::WriteAllLines($envFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host ""
@@ -178,6 +183,24 @@ Write-Host ""
 # session cookie 的 Secure 标记现在按实际请求协议自动决定：纯 HTTP 访问不带
 # Secure（否则浏览器会丢弃 cookie 导致登录失败），HTTPS 或带 X-Forwarded-Proto:
 # https 的反代访问则自动带上。一般无需手动干预，保留 -InsecureCookie 作为兜底。
+
+# 对外模式（-Public）：服务仍只监听 127.0.0.1，由本机 cloudflared 隧道从
+# 外部接入，不把端口暴露到公网。后台 /admin 仅允许本机访问，避免被扫。
+if ($Public) {
+    Write-Host "[workbuddy2api] 模式     : 对外模式（cloudflared 隧道接入）" -ForegroundColor Cyan
+    Write-Host "[workbuddy2api] 后台访问 : 仅本机 127.0.0.1，公网不可达" -ForegroundColor Cyan
+    Write-Host "[workbuddy2api] 另开窗口运行隧道：" -ForegroundColor DarkGray
+    Write-Host "    cloudflared tunnel --url http://127.0.0.1:$Port" -ForegroundColor DarkGray
+    Write-Host ""
+    $code = @"
+import os, uvicorn
+from admin.server import create_app
+uvicorn.run(create_app(secure_cookie=True, admin_local_only=True), host="127.0.0.1", port=$Port, log_level="warning")
+"@
+    $code | & ".venv\Scripts\python.exe" -
+    exit $LASTEXITCODE
+}
+
 if ($InsecureCookie) {
     $code = @"
 import os, uvicorn

@@ -35,3 +35,5 @@ wheels/
 management-access.txt
 .idea/
 
+# Cloudflare 隧道二进制（体积大，本地放置）
+cloudflared.exe

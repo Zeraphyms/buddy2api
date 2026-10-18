@@ -111,6 +111,33 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.post("/admin/api/login", json={"key":"wrong"})).status_code, 401)
         self.assertEqual((await self.client.post("/admin/api/login", json={"key":ADMIN})).status_code, 429)
 
+    async def test_public_mode_hides_admin_from_non_local(self):
+        """对外模式下，后台只允许本机访问，API 不受影响。"""
+        app = admin_server.create_app(self.root / "mgmt2", self.auth, API, ADMIN, admin_local_only=True)
+        local = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=("127.0.0.1", 1000)), base_url="https://console.test")
+        remote = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=("203.0.113.9", 1000)), base_url="https://console.test")
+        try:
+            self.assertEqual((await local.get("/admin/")).status_code, 200)
+            self.assertEqual((await remote.get("/admin/")).status_code, 403)
+            self.assertEqual((await remote.get("/admin/api/session")).status_code, 403)
+            # 非后台路径不受影响
+            self.assertEqual((await remote.get("/health")).status_code, 200)
+            self.assertEqual((await remote.get("/v1/models")).status_code, 401)
+            ok = await remote.get("/v1/models", headers={"Authorization": f"Bearer {API}"})
+            self.assertEqual(ok.status_code, 200)
+        finally:
+            await local.aclose()
+            await remote.aclose()
+
+    async def test_default_mode_keeps_admin_reachable(self):
+        """默认模式（不加 -Public）行为不变：后台对外仍可访问。"""
+        app = admin_server.create_app(self.root / "mgmt3", self.auth, API, ADMIN)
+        remote = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=("203.0.113.9", 1000)), base_url="https://console.test")
+        try:
+            self.assertEqual((await remote.get("/admin/")).status_code, 200)
+        finally:
+            await remote.aclose()
+
 
 if __name__ == "__main__":
     unittest.main()

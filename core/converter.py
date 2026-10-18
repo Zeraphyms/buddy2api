@@ -457,6 +457,10 @@ def get_available_models(region: str | None = None) -> list[str]:
         except Exception:
             pass  # 目录不可用时静默降级
 
+    # 对外白名单兜底：无论走哪条降级路径，都只暴露允许的模型
+    if MODEL_ALLOWLIST is not None:
+        return sorted(MODEL_ALLOWLIST)
+
     workbuddy_models = _load_models_from_workbuddy()
 
     if workbuddy_models:
@@ -504,6 +508,26 @@ CONFIG: dict = {
     "no_compact": False,
 }  # cred: CredentialManager | None
 
+# 管理后台注入：每日对话次数配额检查。签名为 (token) -> None，超额时抛 HTTPException。
+# 独立转换器模式/未开启限额时保持 None，不产生任何额外开销。
+QUOTA_CHECK = None
+
+# 管理后台注入：对外允许的模型白名单。None 表示不限制。
+MODEL_ALLOWLIST = None
+
+
+def _check_model(model_name):
+    """对外模式下校验模型是否在白名单内。未配置白名单时不做任何限制。"""
+    if MODEL_ALLOWLIST is None:
+        return
+    name = (model_name or "auto").strip()
+    if name not in MODEL_ALLOWLIST:
+        allowed = "、".join(sorted(MODEL_ALLOWLIST))
+        raise HTTPException(
+            status_code=403,
+            detail={"error": {"message": f"模型 {name} 未开放，可用模型：{allowed}", "type": "model_not_allowed"}},
+        )
+
 # 管理后台注入：按区域返回上游真实模型 ID 列表。独立转换器模式保持 None。
 MODEL_PROVIDER = None
 # 管理后台注入：model_id -> 上游目录元数据（上下文长度 / 思考档位 / 倍率等）。
@@ -538,6 +562,9 @@ def _truncate(s: str, n: int = 80) -> str:
 def _check_auth(authorization: str | None, x_api_key: str | None):
     key = CONFIG["api_key"]
     if not key:
+        # 无全局 Key 时（独立转换器模式）仍执行配额检查，交给注入方判断
+        if QUOTA_CHECK is not None:
+            QUOTA_CHECK("")
         return
     token = ""
     if authorization and authorization.startswith("Bearer "):
@@ -549,6 +576,8 @@ def _check_auth(authorization: str | None, x_api_key: str | None):
             status_code=401,
             detail={"error": {"message": "invalid api key", "type": "auth_error"}},
         )
+    if QUOTA_CHECK is not None:
+        QUOTA_CHECK(token)
 
 
 def _cred() -> CredentialManager:
@@ -618,7 +647,6 @@ async def chat_completions(
     x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
 ):
     _check_auth(authorization, x_api_key)
-    cred = _cred()
 
     try:
         payload = await request.json()
@@ -676,6 +704,8 @@ async def chat_completions(
 
     # 日志：请求摘要
     model_name = payload.get("model", "auto")
+    _check_model(model_name)
+    cred = _cred()
     tool_names = [
         t.get("function", {}).get("name")
         for t in (payload.get("tools") or [])
@@ -1097,6 +1127,7 @@ async def create_response(
 
     client_wants_stream = bool(payload.get("stream", False))
     model_name = payload.get("model", "auto")
+    _check_model(model_name)
     rid = os.urandom(4).hex()
     _log(
         f"[{rid}] ▶ RESPONSES {model_name} | stream={client_wants_stream} | input_items={len(payload.get('input', []))}"
@@ -1287,6 +1318,7 @@ async def create_message(
         )
 
     model_name = payload.get("model", "auto")
+    _check_model(model_name)
     chat_messages = chat_body.get("messages", [])
     rid = os.urandom(4).hex()
     _log(

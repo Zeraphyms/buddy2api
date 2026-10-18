@@ -23,6 +23,7 @@ from .metrics import RequestMetrics, MetricsMiddleware
 from .rates import ModelRates
 from .modelmeta import ModelMeta
 from .usage import UsageStats
+from .quota import DailyQuota, DEFAULT_LIMIT
 
 COOKIE = "workbuddy_admin"
 MAX_BODY = 1024 * 1024
@@ -39,6 +40,17 @@ ASSET_TYPES = {
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def is_loopback_peer(scope):
+    """判断连接是否来自本机回环地址。
+
+    用 ASGI 的 peer 信息判断，而不是看请求头：请求头可以被伪造，
+    而 peer 是内核提供的真实来源地址。
+    """
+    client = scope.get("client")
+    host = client[0] if client else ""
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 def is_https(req, fallback=False):
@@ -89,6 +101,8 @@ class Store:
         self.sessions, self.attempts = {}, {}
         self.test_lock = asyncio.Lock()
         self.test_keys = set()
+        self.quota = None  # 由 create_app 注入 DailyQuota
+        self.public_model_limit = None  # 对外可用的模型白名单；None 表示不限制
         self.managers = {}
         self.started = time.time()
         self.events = deque(maxlen=40)
@@ -231,8 +245,12 @@ class Store:
         with self.lock:
             hashed = digest(token)
             allowed = hashed in self.test_keys or any(hmac.compare_digest(hashed, item["hash"]) for item in self.data["keys"].values())
+            # 后台测试用的临时 Key 不计入配额
+            is_test = hashed in self.test_keys
         if not allowed:
             raise HTTPException(401, "invalid api key")
+        if not is_test and self.quota is not None:
+            self.quota.check_and_count(digest(token))
 
     def require_admin(self, req):
         sid = req.cookies.get(COOKIE, "")
@@ -247,12 +265,24 @@ class Store:
 
 
 class AdminMiddleware:
-    def __init__(self, app):
+    """管理后台的防护中间件。
+
+    local_only=True 时只接受来自本机回环地址的 /admin 请求。对外模式
+    （cloudflared 隧道）下用它把后台藏起来，公网只能走 /v1/*。
+    """
+
+    def __init__(self, app, local_only=False):
         self.app = app
+        self.local_only = local_only
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or not scope["path"].startswith("/admin"):
             return await self.app(scope, receive, send)
+        if self.local_only and not is_loopback_peer(scope):
+            response = JSONResponse(
+                {"detail": "管理后台仅允许本机访问"}, status_code=403
+            )
+            return await response(scope, receive, send)
         messages, size = [], 0
         while True:
             message = await receive()
@@ -278,8 +308,21 @@ class AdminMiddleware:
         await self.app(scope, replay, secure_send)
 
 
-def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secure_cookie=True):
+def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secure_cookie=True,
+               admin_local_only=False):
     store = Store(root or os.environ.get("MANAGEMENT_DATA_DIR", "/data/management"), auth_dir or os.environ.get("CODEBUDDY_AUTH_DIR", "/data/auth"), initial_key if initial_key is not None else os.environ.get("CODEBUDDY2OPENAI_KEY", ""), admin_key or os.environ.get("ADMIN_KEY", ""))
+    # 每日对话次数配额：默认 1000 次/Key/天，DAILY_REQUEST_LIMIT=0 可关闭
+    try:
+        quota_limit = int(os.environ.get("DAILY_REQUEST_LIMIT", str(DEFAULT_LIMIT)))
+    except ValueError:
+        quota_limit = DEFAULT_LIMIT
+    store.quota = DailyQuota(store, quota_limit)
+
+    # 对外模型白名单：PUBLIC_MODELS 逗号分隔，留空表示不限制
+    raw_models = os.environ.get("PUBLIC_MODELS", "").strip()
+    if raw_models:
+        store.public_model_limit = {m.strip() for m in raw_models.split(",") if m.strip()}
+        converter.MODEL_ALLOWLIST = set(store.public_model_limit)
     converter._check_auth = store.check_api
     converter.CONFIG.update({"desensitize": True, "no_compact": False, "log_path": None})
     browser_login = BrowserLogin(store.save_browser_account)
@@ -405,7 +448,16 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
             pairs = [p for p in pairs if p[0] == active]
         if not pairs:
             return []
-        return rates.models_for_accounts(pairs)
+        models = rates.models_for_accounts(pairs)
+        # 对外白名单：仅当配置了允许的模型且开启对外限制时，才裁剪返回列表
+        if store.public_model_limit is not None:
+            allowed = store.public_model_limit
+            models = [m for m in models if m in allowed]
+            # 白名单里的模型即使当前不在可用列表，也照常返回，避免客户端取不到
+            for m in allowed:
+                if m not in models:
+                    models.append(m)
+        return models
 
     converter.MODEL_PROVIDER = _model_provider
 
@@ -495,7 +547,7 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
     app.state.pool = pool
     app.state.metrics = metrics
     app.state.rates = rates
-    app.add_middleware(AdminMiddleware)
+    app.add_middleware(AdminMiddleware, local_only=admin_local_only)
     app.add_middleware(PoolMiddleware, pool=pool)
     app.add_middleware(MetricsMiddleware, metrics=metrics)
 
