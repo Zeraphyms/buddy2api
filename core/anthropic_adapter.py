@@ -24,6 +24,49 @@ def _rand_id(prefix: str = "") -> str:
     return prefix + os.urandom(12).hex()
 
 
+def _cached_tokens(usage: dict) -> int:
+    """从后端 OpenAI 风格的 usage 里取缓存命中数。
+
+    不同上游字段名不一致，按优先级依次尝试；都没有则返回 0。
+    """
+    values = [
+        (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+        (usage.get("input_tokens_details") or {}).get("cached_tokens"),
+        usage.get("cache_read_input_tokens"),
+        usage.get("prompt_cache_hit_tokens"),
+        usage.get("cached_tokens"),
+    ]
+    for value in values:
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return int(value)
+    return 0
+
+
+def anthropic_usage(usage: dict | None) -> dict:
+    """把后端 usage 转成 Anthropic Messages 的 usage 结构。
+
+    Claude Code / DeepSeek Harness 用 cache_read_input_tokens 计算缓存命中率，
+    缺这个字段会一律显示 0%%。input_tokens 保持为未缓存部分的语义。
+    """
+    usage = usage or {}
+    prompt = int(usage.get("prompt_tokens") or 0)
+    cached = _cached_tokens(usage)
+    cached = min(cached, prompt) if prompt else cached
+    return {
+        "input_tokens": max(prompt - cached, 0),
+        "output_tokens": int(usage.get("completion_tokens") or 0),
+        "cache_read_input_tokens": cached,
+        "cache_creation_input_tokens": 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 请求转换：Anthropic → Chat
+# ---------------------------------------------------------------------------
+
+
+
+
 # ---------------------------------------------------------------------------
 # 请求转换：Anthropic → Chat
 # ---------------------------------------------------------------------------
@@ -320,13 +363,7 @@ class AnthropicStreamConverter:
 
         # message_delta
         delta: dict[str, str | None] = {"stop_reason": stop_reason, "stop_sequence": None}
-        usage = None
-        if self._usage:
-            u = self._usage
-            usage = {
-                "input_tokens": u.get("prompt_tokens", 0),
-                "output_tokens": u.get("completion_tokens", 0),
-            }
+        usage = anthropic_usage(self._usage) if self._usage else None
         events.append(self._evt("message_delta", {"delta": delta, "usage": usage}))
 
         # message_stop
@@ -355,10 +392,7 @@ class AnthropicStreamConverter:
             "stop_sequence": None,
         }
         if self._usage:
-            resp["usage"] = {
-                "input_tokens": self._usage.get("prompt_tokens", 0),
-                "output_tokens": self._usage.get("completion_tokens", 0),
-            }
+            resp["usage"] = anthropic_usage(self._usage)
         return resp
 
     # ---- 内部 ----

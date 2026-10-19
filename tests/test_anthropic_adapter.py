@@ -405,6 +405,53 @@ def test_empty_messages():
     print("✅ test_empty_messages")
 
 
+def test_usage_cache_read_from_prompt_details():
+    """缓存命中数从 prompt_tokens_details.cached_tokens 透出，供客户端算命中率。"""
+    conv = AnthropicStreamConverter(model="deepseek-v4-pro")
+    conv.feed_line('data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":800}}}')
+
+    resp = conv.get_nonstream_response()
+    usage = resp["usage"]
+    assert usage["cache_read_input_tokens"] == 800, usage
+    assert usage["cache_creation_input_tokens"] == 0, usage
+    assert usage["input_tokens"] == 200, usage
+    assert usage["output_tokens"] == 5, usage
+
+    sse = conv.finish()
+    assert '"cache_read_input_tokens":800' in sse.replace(" ", ""), sse
+
+    print("✅ test_usage_cache_read_from_prompt_details")
+
+
+def test_usage_cache_read_variants():
+    """兼容几种不同的上游缓存字段命名。"""
+    cases = [
+        {"prompt_tokens": 1000, "prompt_cache_hit_tokens": 640},
+        {"prompt_tokens": 1000, "cached_tokens": 640},
+        {"prompt_tokens": 1000, "cache_read_input_tokens": 640},
+        {"prompt_tokens": 1000, "input_tokens_details": {"cached_tokens": 640}},
+    ]
+    for usage in cases:
+        conv = AnthropicStreamConverter(model="m")
+        chunk = json.dumps({"id": "c", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": usage})
+        conv.feed_line("data: " + chunk)
+        resp = conv.get_nonstream_response()
+        assert resp["usage"]["cache_read_input_tokens"] == 640, (usage, resp["usage"])
+
+    print("✅ test_usage_cache_read_variants")
+
+
+def test_usage_without_cache_fields():
+    """上游没给缓存字段时，命中数为 0，input_tokens 保持原值。"""
+    conv = AnthropicStreamConverter(model="m")
+    conv.feed_line('data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":42,"completion_tokens":3}}')
+    usage = conv.get_nonstream_response()["usage"]
+    assert usage["cache_read_input_tokens"] == 0, usage
+    assert usage["input_tokens"] == 42, usage
+
+    print("✅ test_usage_without_cache_fields")
+
+
 if __name__ == "__main__":
     test_simple_text_request()
     test_system_array()
@@ -419,4 +466,7 @@ if __name__ == "__main__":
     test_nonstream_response()
     test_nonstream_response_tool_use()
     test_empty_messages()
-    print(f"\n🎉 All {13} tests passed!")
+    test_usage_cache_read_from_prompt_details()
+    test_usage_cache_read_variants()
+    test_usage_without_cache_fields()
+    print(f"\n🎉 All {16} tests passed!")
