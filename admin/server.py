@@ -477,6 +477,7 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
             if not mid or mid in table:
                 continue
             table[mid] = {
+                "name": row.get("name"),
                 "context_length": row.get("context_length"),
                 "context_default_length": row.get("context_default_length"),
                 "context_lengths": row.get("context_lengths") or [],

@@ -28,7 +28,7 @@ MODELS = {
             "description": "平衡效果与速度。自动为每个任务匹配最优模型，积分倍率随之浮动",
         },
         "deepseek-v4-flash": {
-            "name": "Deepseek-V4-Flash",
+            "name": "DeepSeek-V4-Flash",
             "credit": 0.17,
             "default_effort": "high",
             "supported_efforts": ["low", "high", "xhigh"],
@@ -41,7 +41,7 @@ MODELS = {
             "description": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
         },
         "deepseek-v4-pro": {
-            "name": "Deepseek-V4-Pro",
+            "name": "DeepSeek-V4-Pro",
             "credit": 0.51,
             "default_effort": "high",
             "supported_efforts": ["low", "high", "xhigh"],
@@ -54,7 +54,7 @@ MODELS = {
             "description": "DeepSeek 旗舰模型，支持 1M 上下文窗口",
         },
         "deepseek-v4.1-flash": {
-            "name": "Deepseek-V4.1-Flash",
+            "name": "DeepSeek-V4.1-Flash",
             "credit": 0.11,
             "default_effort": "high",
             "supported_efforts": ["low", "high", "max"],
@@ -158,7 +158,7 @@ MODELS = {
             "description": "混元思考模型，具有增强的推理能力",
         },
         "hy4-preview": {
-            "name": "Hy4 preview",
+            "name": "Hy4 Preview",
             "credit": 0.29,
             "default_effort": "high",
             "supported_efforts": ["high"],
@@ -171,7 +171,7 @@ MODELS = {
             "description": "混元思考模型，具有增强的推理能力",
         },
         "hy4-preview-f": {
-            "name": "Hy4 preview",
+            "name": "Hy4 Preview",
             "credit": 0.29,
             "default_effort": "high",
             "supported_efforts": ["high"],
@@ -248,6 +248,19 @@ MODELS = {
             "supports_tool_call": True,
             "description": "原生多模态，擅长代码、智能体任务",
         },
+        "step-5-preview": {
+            "name": "Step-5-Preview",
+            "credit": 0.0,
+            "default_effort": "high",
+            "supported_efforts": ["low", "medium", "high"],
+            "can_disable_thinking": False,
+            "supports_reasoning": True,
+            "context_length": 1000000,
+            "max_output_tokens": 64000,
+            "supports_images": True,
+            "supports_tool_call": True,
+            "description": "阶跃 StepFun 面向真实任务的新一代旗舰基模",
+        },
     },
     "intl": {
         "auto": {
@@ -277,7 +290,7 @@ MODELS = {
             "description": "速度与质量兼 顾，日常工作首选",
         },
         "deepseek-v4.1-flash": {
-            "name": "Deepseek-V4.1-Flash",
+            "name": "DeepSeek-V4.1-Flash",
             "credit": 0.0,
             "default_effort": "high",
             "supported_efforts": ["high"],
@@ -290,7 +303,7 @@ MODELS = {
             "description": "DeepSeek 旗舰模型，支持 1M 上下文窗口，原生多模态",
         },
         "deepseek-v4.1-flash-sg": {
-            "name": "Deepseek-V4.1-Flash",
+            "name": "DeepSeek-V4.1-Flash",
             "credit": 0.03,
             "default_effort": "high",
             "supported_efforts": [],
@@ -524,7 +537,7 @@ MODELS = {
             "description": "混元思考模型，具有增强的推理能力",
         },
         "hy4-preview": {
-            "name": "Hy4 preview",
+            "name": "Hy4 Preview",
             "credit": 0.29,
             "default_effort": "high",
             "supported_efforts": ["high"],
@@ -537,7 +550,7 @@ MODELS = {
             "description": "混元思考模型，具有增强的推理能力",
         },
         "hy4-preview-f": {
-            "name": "hy4-preview-f",
+            "name": "Hy4 Preview",
             "credit": None,
             "default_effort": "high",
             "supported_efforts": ["high"],
@@ -550,7 +563,7 @@ MODELS = {
             "description": "",
         },
         "hy4-preview-x": {
-            "name": "hy4-preview-x",
+            "name": "Hy4 Preview",
             "credit": 0.29,
             "default_effort": "high",
             "supported_efforts": ["high"],
