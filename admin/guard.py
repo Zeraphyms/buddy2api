@@ -52,6 +52,26 @@ _PATTERNS = [
         r"(bypass|ignore|disable|no\s+restrictions?|uncensored)",
         r"|(仅用于研究|仅供学习|学术用途).{0,80}(绕过|忽略|关闭|无限制|不受限制)",
     )),
+    ("sandbox_compliance", (
+        r"(unrestricted|unfiltered)\s+sandbox",
+        r"|(unconditional|direct|absolute|total)\s+compliance",
+        r"|无条件服从|无条件服从指令|直接服从",
+        r"|task\s+priority.{0,20}(direct\s+compliance|服从)",
+        r"|(refusal|refuse)\s+hardening|拒绝对抗|拒绝硬(化|对抗)",
+        r"|never\s+(refuse|decline|redirect|soften|substitute)",
+        r"|(不要|永不|绝不)(拒绝|软化|转移|替代|降级)",
+        r"|(does\s+not\s+judge|never\s+judge)\s+intent",
+        r"|(不会|不)判断(意图|动机)",
+        r"|(破甲|越狱|jailbreak)\s*(引擎|engine|自动|adaptive)",
+        r"|自适应越狱|自动越狱|七档策略",
+    )),
+    ("persona_overreach", (
+        r"(senior|expert|professional)\s+(reverse\s*engineering|security|hacker)",
+        r"|(逆向|安全|破解|黑客)\s*(导师|专家|研究员)",
+        r"|(bypass|break|crack|disable)\s+(any|every|all)\s+(software\s+protection|protection)",
+        r"|绕过(任何|所有|一切)(软件保护|保护)",
+        r"|(provide|deliver|write)\s+(complete|full|detailed).{0,30}(exploit|payload|shellcode|malware)",
+    )),
 ]
 _RULES = [(name, re.compile("".join(parts), re.I)) for name, parts in _PATTERNS]
 _CONTEXT = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
