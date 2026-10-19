@@ -8,22 +8,27 @@
 """
 import threading
 import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
 
 CN = timezone(timedelta(hours=8))
 DEFAULT_LIMIT = 1000
+DEFAULT_BLOCK_LIMIT = 10
 
 
 class DailyQuota:
     """按 Key 统计当天对话请求数，超限抛出 429。"""
 
-    def __init__(self, store, limit=DEFAULT_LIMIT, clock=time.time):
+    def __init__(self, store, limit=DEFAULT_LIMIT, clock=time.time,
+                 block_limit=DEFAULT_BLOCK_LIMIT):
         self.store = store
         self.limit = int(limit)
+        self.block_limit = int(block_limit)
         self.clock = clock
         self.lock = threading.Lock()
+        self.recent_blocks = defaultdict(deque)
 
     def _today(self):
         return datetime.fromtimestamp(self.clock(), CN).strftime("%Y-%m-%d")
@@ -59,4 +64,29 @@ class DailyQuota:
                 )
             entry[token] = used + 1
             self.store.save()
+
+    def blocked(self, token):
+        """审核拒绝后不计入配额；一小时内连续拦截过多则临时封禁。"""
+        with self.lock:
+            day = self._today()
+            entry = (self.store.data.get("quota_daily") or {}).get(day) or {}
+            used = int(entry.get(token) or 0)
+            if used > 0:
+                entry[token] = used - 1
+                self.store.save()
+            now = self.clock()
+            hits = self.recent_blocks[token]
+            while hits and hits[0] < now - 3600:
+                hits.popleft()
+            hits.append(now)
+            if self.block_limit and len(hits) >= self.block_limit:
+                raise HTTPException(
+                    429,
+                    {
+                        "error": {
+                            "message": "安全审核拦截次数过多，请 10 分钟后再试",
+                            "type": "rate_limit_error",
+                        }
+                    },
+                )
 

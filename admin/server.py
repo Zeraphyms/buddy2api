@@ -102,6 +102,8 @@ class Store:
         self.test_lock = asyncio.Lock()
         self.test_keys = set()
         self.quota = None  # 由 create_app 注入 DailyQuota
+        self.guard_enabled = True
+        self.guard_events = deque(maxlen=100)
         self.public_model_limit = None  # 对外可用的模型白名单；None 表示不限制
         self.managers = {}
         self.started = time.time()
@@ -126,6 +128,20 @@ class Store:
                 self.add_key("原有 API Key", initial_key)
             self.save()
         self.sync_active()
+
+    def request_token(self, authorization, x_api_key):
+        return authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else x_api_key or ""
+
+    def check_auth(self, authorization, x_api_key):
+        """Verify a Key without counting a quota request yet."""
+        token = self.request_token(authorization, x_api_key)
+        with self.lock:
+            hashed = digest(token)
+            allowed = hashed in self.test_keys or any(hmac.compare_digest(hashed, item["hash"]) for item in self.data["keys"].values())
+            is_test = hashed in self.test_keys
+        if not allowed:
+            raise HTTPException(401, "invalid api key")
+        return token, is_test
 
     @staticmethod
     def validate_credential(doc):
@@ -240,17 +256,36 @@ class Store:
             rows.append(row)
         return rows
 
-    def check_api(self, authorization, x_api_key):
-        token = authorization[7:].strip() if authorization and authorization.startswith("Bearer ") else x_api_key or ""
-        with self.lock:
-            hashed = digest(token)
-            allowed = hashed in self.test_keys or any(hmac.compare_digest(hashed, item["hash"]) for item in self.data["keys"].values())
-            # 后台测试用的临时 Key 不计入配额
-            is_test = hashed in self.test_keys
-        if not allowed:
-            raise HTTPException(401, "invalid api key")
-        if not is_test and self.quota is not None:
+    def check_api(self, authorization, x_api_key, count=True):
+        token, is_test = self.check_auth(authorization, x_api_key)
+        hashed = digest(token)
+        if (self.data.get("guard_limited") or {}).get(hashed) and ((self.data["guard_limited"][hashed] or 0) <= time.time()):
+            self.data["guard_limited"].pop(hashed, None)
+        until = (self.data.get("guard_limited") or {}).get(hashed)
+        if until and until > time.time() and not is_test:
+            raise HTTPException(
+                429,
+                {
+                    "error": {
+                        "message": "安全审核拦截次数过多，请 10 分钟后再试",
+                        "type": "rate_limit_error",
+                    }
+                },
+            )
+        if count and not is_test and self.quota is not None:
             self.quota.check_and_count(digest(token))
+
+    def report_guard(self, token, rule):
+        """记录拦截但不保存提示词；连续触发时临时封禁该 Key。"""
+        token = digest(token)
+        self.guard_events.appendleft({"time": int(time.time()), "rule": rule})
+        if self.quota is not None:
+            try:
+                self.quota.blocked(token)
+            except HTTPException:
+                self.data.setdefault("guard_limited", {})[token] = time.time() + 600
+                self.save()
+                raise
 
     def require_admin(self, req):
         sid = req.cookies.get(COOKIE, "")
@@ -309,7 +344,7 @@ class AdminMiddleware:
 
 
 def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secure_cookie=True,
-               admin_local_only=False):
+               admin_local_only=False, guard_enabled=None):
     store = Store(root or os.environ.get("MANAGEMENT_DATA_DIR", "/data/management"), auth_dir or os.environ.get("CODEBUDDY_AUTH_DIR", "/data/auth"), initial_key if initial_key is not None else os.environ.get("CODEBUDDY2OPENAI_KEY", ""), admin_key or os.environ.get("ADMIN_KEY", ""))
     # 每日对话次数配额：默认 1000 次/Key/天，DAILY_REQUEST_LIMIT=0 可关闭
     try:
@@ -317,6 +352,7 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
     except ValueError:
         quota_limit = DEFAULT_LIMIT
     store.quota = DailyQuota(store, quota_limit)
+    store.guard_enabled = True if guard_enabled is None else bool(guard_enabled)
 
     # 对外模型白名单：PUBLIC_MODELS 逗号分隔，留空表示不限制
     raw_models = os.environ.get("PUBLIC_MODELS", "").strip()
@@ -813,7 +849,7 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
         store.require_admin(req)
         with store.lock:
             keys = store.key_rows()
-            return {"accounts": pool.rows(store.account_rows()), "pool": dict(store.data["pool"]), "metrics": metrics.snapshot(), "keys": keys, "models": converter.get_available_models(), "uptime": int(time.time() - store.started), "events": list(store.events)}
+            return {"accounts": pool.rows(store.account_rows()), "pool": dict(store.data["pool"]), "metrics": metrics.snapshot(), "keys": keys, "models": converter.get_available_models(), "uptime": int(time.time() - store.started), "events": list(store.events), "guard": {"enabled": store.guard_enabled, "events": list(store.guard_events)}}
 
     @app.get("/admin/api/accounts/{aid}/tasks")
     async def account_tasks(aid: str, req: Request):
@@ -1059,6 +1095,7 @@ def create_app(root=None, auth_dir=None, initial_key=None, admin_key=None, secur
             store.events.appendleft({"time": int(time.time()), "model": model, "ok": output["ok"], "seconds": output["seconds"]})
             return output
 
+    # Nested ASGI mounts bypass the parent middleware stack.
     app.mount("/", converter.app)
     return app
 

@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from core import converter
 
 from . import autotask, events
+from .metrics import PATHS as DIALOG_PATHS
 from . import tasks
 from .taskcenter import TaskCenter
 
@@ -25,6 +26,9 @@ REQUEST_CREDENTIAL = ContextVar("pool_credential", default=None)
 REQUEST_REGION = ContextVar("pool_region", default=None)
 # 当前请求实际使用的账号 id，供按账号学习模型可用性
 REQUEST_ACCOUNT = ContextVar("pool_account", default=None)
+# Set by GuardMiddleware after a request has passed prompt review, so a later
+# account-pool copy of the body can tell that its hours have already been counted.
+REQUEST_GUARDED = ContextVar("pool_guarded", default=False)
 CN = timezone(timedelta(hours=8))
 BILLING = "https://www.codebuddy.cn/v2/billing/meter/"
 
@@ -535,7 +539,11 @@ class PoolMiddleware:
             return await self.app(scope, receive, send)
         headers = dict(scope.get("headers", []))
         try:
-            self.pool.store.check_api(headers.get(b"authorization", b"").decode(), headers.get(b"x-api-key", b"").decode())
+            store = self.pool.store
+            authorization = headers.get(b"authorization", b"").decode()
+            api_key = headers.get(b"x-api-key", b"").decode()
+            check_quota = not (store.guard_enabled and scope["path"] in DIALOG_PATHS)
+            store.check_api(authorization, api_key, count=check_quota)
             raw = bytearray()
             oversized = False
             while True:
@@ -557,6 +565,13 @@ class PoolMiddleware:
                 body = json.loads(raw) if raw else {}
             except ValueError:
                 body = {}
+            from . import guard
+            if scope["path"] != "/v1/messages/count_tokens":
+                try:
+                    guard.reject(body)
+                except HTTPException:
+                    store.report_guard(store.request_token(authorization, api_key), guard.matched_rule(body))
+                    raise
             # 对外白名单：在选账号之前判断，避免"模型未开放"被 503 掩盖
             if isinstance(body, dict):
                 converter._check_model(body.get("model", "auto"))
@@ -588,6 +603,12 @@ class PoolMiddleware:
             domain = (manager.get_headers() or {}).get("X-Domain", "")
         except Exception:
             domain = ""
+        if not check_quota and scope["path"] in DIALOG_PATHS:
+            # 审核通过后才计入每日配额；拦截请求不占次数。
+            try:
+                store.check_api(authorization, api_key)
+            except HTTPException as exc:
+                return await JSONResponse({"detail": exc.detail}, exc.status_code)(scope, receive, send)
         # 故意不 reset：外层 MetricsMiddleware 在 PoolMiddleware 返回之后才读取该值，
         # 提前 reset 会把所有用量都误记到默认区域。每个请求都是一个独立 asyncio Task，
         # 其 context 是创建时的副本，因此这里的赋值不会泄漏到其它请求。
